@@ -144,8 +144,8 @@ export default function MaterialsByDept({
                   <SortTh label="Nazwa materiału" col="name"     active={sumSort.col === "name"}        dir={sumSort.dir} onClick={() => toggleSumSort("name")} />
                   <SortTh label="j.m."         col="unit"        active={sumSort.col === "unit"}        dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit")} />
                   <SortTh label="Ilość łączna" col="total_qty"   active={sumSort.col === "total_qty"}   dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_qty")} />
-                  <SortTh label="Cena jedn."   col="unit_price"  active={sumSort.col === "unit_price"}  dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit_price")} />
-                  <SortTh label="Wartość"      col="total_value" active={sumSort.col === "total_value"} dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_value")} />
+                  <SortTh label="Cena jedn. netto" col="unit_price"  active={sumSort.col === "unit_price"}  dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit_price")} />
+                  <SortTh label="Wartość netto"    col="total_value" active={sumSort.col === "total_value"} dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_value")} />
                 </tr>
               </thead>
               <tbody>
@@ -162,7 +162,7 @@ export default function MaterialsByDept({
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200 bg-blue-50">
-                  <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Razem:</td>
+                  <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Razem netto:</td>
                   <td className="px-4 py-2 text-right font-bold text-blue-900">{fmt(grandTotal)} zł</td>
                 </tr>
               </tfoot>
@@ -237,8 +237,8 @@ function DeptSection({
                 <SortTh label="Nazwa materiału" col="name" active={sort.col === "name"}        dir={sort.dir} onClick={() => toggleSort("name")} />
                 <SortTh label="j.m."      col="unit"       active={sort.col === "unit"}        dir={sort.dir} align="right" onClick={() => toggleSort("unit")} />
                 <SortTh label="Ilość"     col="qty"        active={sort.col === "qty"}         dir={sort.dir} align="right" onClick={() => toggleSort("qty")} />
-                <SortTh label="Cena jedn." col="unit_price" active={sort.col === "unit_price"} dir={sort.dir} align="right" onClick={() => toggleSort("unit_price")} />
-                <SortTh label="Wartość"   col="value"      active={sort.col === "value"}       dir={sort.dir} align="right" onClick={() => toggleSort("value")} />
+                <SortTh label="Cena jedn. netto" col="unit_price" active={sort.col === "unit_price"} dir={sort.dir} align="right" onClick={() => toggleSort("unit_price")} />
+                <SortTh label="Wartość netto"   col="value"      active={sort.col === "value"}       dir={sort.dir} align="right" onClick={() => toggleSort("value")} />
               </tr>
             </thead>
             <tbody>
@@ -255,7 +255,7 @@ function DeptSection({
             </tbody>
             <tfoot>
               <tr className="border-t border-gray-200 bg-gray-50">
-                <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Razem:</td>
+                <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Razem netto:</td>
                 <td className="px-4 py-2 text-right font-bold text-gray-900">{fmt(totalValue)} zł</td>
               </tr>
             </tfoot>

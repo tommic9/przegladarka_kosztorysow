@@ -172,7 +172,7 @@ export function parseAth(buffer: Buffer): {
     chapterNumByIndex[el.index] = nu;
   }
 
-  // ── Cost items ([POZYCJA] sections) ──────────────────────────────────────
+  // ── Cost items ([POZYCJA] + [PRZEDMIAR] sections) ────────────────────────
   const costItems: ParsedCostItem[] = [];
   // Track position counter per chapter
   const posCounterByChapter: Record<string, number> = {};
@@ -209,6 +209,22 @@ export function parseAth(buffer: Buffer): {
         ? Math.round(qty * unitPrice * 100) / 100
         : null;
 
+    // Measurement formula from immediately following [PRZEDMIAR] section
+    let measurement: string | null = null;
+    if (i + 1 < sections.length && sections[i + 1].name === "PRZEDMIAR") {
+      const przedmiar = sections[i + 1];
+      // wo= is tab-separated: result \t flag \t formula \t ... \t unit
+      const woParts = (przedmiar.fields["wo"] ?? "").split("\t");
+      const result = woParts[0]?.trim();
+      const formula = woParts[2]?.trim();
+      const unit = firstToken(s.fields["jm"] ?? "") || null;
+      if (formula) {
+        measurement = unit ? `${formula} = ${result} ${unit}` : `${formula} = ${result}`;
+      } else if (result) {
+        measurement = unit ? `${result} ${unit}` : result;
+      }
+    }
+
     costItems.push({
       lp,
       chapter_number: parentChapterNum,
@@ -218,6 +234,7 @@ export function parseAth(buffer: Buffer): {
       qty,
       unit_price: unitPrice,
       total_value_netto: totalValue,
+      measurement,
     });
   }
 

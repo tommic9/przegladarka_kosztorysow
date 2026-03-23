@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     let materialsFileName: string | null = null;
 
     type CostChapterData = { number: string; name: string; level: number; order_index: number; total_netto: number | null };
-    type CostItemData = { lp: string; chapter_number: string; knr: string | null; name: string; unit: string | null; qty: number | null; unit_price: number | null; total_value_netto: number | null };
+    type CostItemData = { lp: string; chapter_number: string; knr: string | null; name: string; unit: string | null; qty: number | null; unit_price: number | null; total_value_netto: number | null; measurement: string | null };
     type MaterialData = { lp: number; index_code: string; name: string; unit: string | null; total_qty: number | null; unit_price: number | null; total_value: number | null; depts: { dept_number: string; dept_name: string; sub_dept_number: string | null; sub_dept_name: string | null; unit: string | null; qty: number | null; unit_price: number | null; value: number | null }[] };
 
     let costChapters: CostChapterData[] = [];
@@ -151,8 +151,8 @@ export async function POST(req: NextRequest) {
        VALUES (?, ?, ?, ?, ?)`
     );
     const insertItem = db.prepare(
-      `INSERT INTO cost_items (version_id, chapter_id, lp, knr, name, unit, qty, unit_price, total_value_netto)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO cost_items (version_id, chapter_id, lp, knr, name, unit, qty, unit_price, total_value_netto, measurement)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     const run = db.transaction(() => {
@@ -179,7 +179,8 @@ export async function POST(req: NextRequest) {
         const chapterId = chapterIdMap[item.chapter_number] ?? null;
         insertItem.run(
           versionId, chapterId, item.lp, item.knr, item.name,
-          item.unit, item.qty, item.unit_price, item.total_value_netto
+          item.unit, item.qty, item.unit_price, item.total_value_netto,
+          item.measurement ?? null
         );
       }
 

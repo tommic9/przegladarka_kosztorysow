@@ -9,6 +9,7 @@ type CostChapter = {
 type CostItem = {
   id: number; chapter_id: number | null; lp: string | null; knr: string | null; name: string;
   unit: string | null; qty: number | null; unit_price: number | null; total_value_netto: number | null;
+  measurement: string | null;
 };
 
 type ProjectMeta = {
@@ -129,6 +130,21 @@ export default function CostCalculator({
           <span className="font-medium">DATA OPRACOWANIA:</span>
           <span>{new Date(versionDate).toLocaleDateString("pl-PL")}</span>
         </div>
+        {/* Totals summary in print header */}
+        <div className="border border-gray-300 text-sm">
+          <div className="flex justify-between px-4 py-1.5 border-b border-gray-200">
+            <span className="font-medium">Wartość robót netto:</span>
+            <span className="tabular-nums">{fmt(selectedNetto)} zł</span>
+          </div>
+          <div className="flex justify-between px-4 py-1.5 border-b border-gray-200">
+            <span className="font-medium">Podatek VAT {vatRate}%:</span>
+            <span className="tabular-nums">{fmt(selectedVat)} zł</span>
+          </div>
+          <div className="flex justify-between px-4 py-2 bg-gray-100">
+            <span className="font-bold">Wartość robót brutto:</span>
+            <span className="font-bold tabular-nums">{fmt(selectedBrutto)} zł</span>
+          </div>
+        </div>
       </div>
 
       {/* Toolbar — hidden on print */}
@@ -191,8 +207,8 @@ export default function CostCalculator({
                       <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Opis</th>
                       <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">j.m.</th>
                       <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Ilość</th>
-                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Cena jedn.</th>
-                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Wartość</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Cena jedn. netto</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Wartość netto</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -226,6 +242,16 @@ export default function CostCalculator({
                           </td>
                           <td className={`px-3 py-2 text-gray-900 max-w-xs ${isDisabled ? "line-through" : ""}`}>
                             {item.name}
+                            {item.measurement && (
+                              <div className="text-xs text-gray-400 font-mono mt-0.5 no-print">
+                                📐 {item.measurement}
+                              </div>
+                            )}
+                            {item.measurement && (
+                              <div className="text-xs text-gray-400 font-mono mt-0.5 print-only">
+                                Obmiar: {item.measurement}
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-2 text-right text-gray-600">{item.unit || "—"}</td>
                           <td className="px-3 py-2 text-right text-gray-900">{item.qty !== null ? fmt(item.qty, 2) : "—"}</td>
@@ -242,7 +268,7 @@ export default function CostCalculator({
                   <tfoot>
                     <tr className="border-t border-gray-200 bg-gray-50">
                       <td colSpan={7} className="px-3 py-2 text-right text-xs font-semibold text-gray-600">
-                        Razem dział:
+                        Razem netto:
                       </td>
                       <td className="px-3 py-2 text-right font-bold text-gray-900">
                         {fmt(chapterSelectedNetto)} zł
@@ -258,25 +284,25 @@ export default function CostCalculator({
 
       {/* Summary */}
       <div className="mt-6 border-t-2 border-gray-900 pt-4">
-        <div className="max-w-sm ml-auto space-y-1 text-sm">
-          <div className="flex justify-between">
+        <div className="max-w-sm ml-auto border border-gray-300 rounded-lg overflow-hidden text-sm">
+          <div className="flex justify-between px-4 py-2 bg-gray-50">
             <span className="text-gray-600">Wartość robót netto:</span>
-            <span className="font-medium">{fmt(selectedNetto)} zł</span>
+            <span className="font-medium tabular-nums">{fmt(selectedNetto)} zł</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex justify-between px-4 py-2 border-t border-gray-200">
             <span className="text-gray-600">Podatek VAT {vatRate}%:</span>
-            <span className="font-medium">{fmt(selectedVat)} zł</span>
+            <span className="font-medium tabular-nums">{fmt(selectedVat)} zł</span>
           </div>
-          <div className="flex justify-between border-t border-gray-200 pt-1 mt-1">
-            <span className="font-bold text-gray-900">Wartość robót brutto:</span>
-            <span className="font-bold text-gray-900">{fmt(selectedBrutto)} zł</span>
+          <div className="flex justify-between px-4 py-2.5 border-t-2 border-gray-900 bg-gray-900 text-white">
+            <span className="font-bold">Wartość robót brutto:</span>
+            <span className="font-bold tabular-nums">{fmt(selectedBrutto)} zł</span>
           </div>
-          {disabled.size > 0 && (
-            <p className="text-xs text-gray-400 mt-2 no-print">
-              Wyłączono {disabled.size} pozycji ({fmt(totalNetto - selectedNetto)} zł netto)
-            </p>
-          )}
         </div>
+        {disabled.size > 0 && (
+          <p className="text-xs text-gray-400 mt-2 no-print text-right">
+            Wyłączono {disabled.size} pozycji ({fmt(totalNetto - selectedNetto)} zł netto)
+          </p>
+        )}
       </div>
     </>
   );
