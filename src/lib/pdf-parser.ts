@@ -706,6 +706,7 @@ export function parseEstimate(text: string): ParsedEstimate {
 export type ParseResult =
   | { type: "A"; materials: ParsedMaterial[] }
   | { type: "B"; estimate: ParsedEstimate }
+  | { type: "ATH"; estimate: ParsedEstimate; materials: ParsedMaterial[] }
   | { type: "unknown" };
 
 export async function parsePdf(buffer: Buffer): Promise<ParseResult> {

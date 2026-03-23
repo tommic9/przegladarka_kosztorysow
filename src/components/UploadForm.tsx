@@ -9,15 +9,17 @@ export default function UploadForm() {
   const [notes, setNotes] = useState("");
   const [estimateFile, setEstimateFile] = useState<File | null>(null);
   const [materialsFile, setMaterialsFile] = useState<File | null>(null);
+  const [athFile, setAthFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const estimateRef = useRef<HTMLInputElement>(null);
   const materialsRef = useRef<HTMLInputElement>(null);
+  const athRef = useRef<HTMLInputElement>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) { setError("Podaj tytuł projektu"); return; }
-    if (!estimateFile && !materialsFile) { setError("Dodaj co najmniej jeden plik PDF"); return; }
+    if (!estimateFile && !materialsFile && !athFile) { setError("Dodaj co najmniej jeden plik"); return; }
 
     setError("");
     setLoading(true);
@@ -25,8 +27,12 @@ export default function UploadForm() {
     const fd = new FormData();
     fd.append("title", title);
     if (notes) fd.append("notes", notes);
-    if (estimateFile) fd.append("estimate", estimateFile);
-    if (materialsFile) fd.append("materials", materialsFile);
+    if (athFile) {
+      fd.append("ath", athFile);
+    } else {
+      if (estimateFile) fd.append("estimate", estimateFile);
+      if (materialsFile) fd.append("materials", materialsFile);
+    }
 
     try {
       const res = await fetch("/api/projects", { method: "POST", body: fd });
@@ -56,22 +62,39 @@ export default function UploadForm() {
         />
       </div>
 
-      {/* PDFs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Files */}
+      <div className="space-y-3">
         <FileDropZone
-          label="Kosztorys ofertowy (Typ B)"
-          hint="Wyciągamy: metadane projektu + pozycje kosztorysu z cenami"
-          file={estimateFile}
-          onChange={setEstimateFile}
-          inputRef={estimateRef}
+          label="Plik kosztorysowy ATH (NormaWExpert)"
+          hint="Zawiera wszystko: kosztorys + materiały. Zastępuje oba PDFy."
+          file={athFile}
+          onChange={(f) => { setAthFile(f); if (f) { setEstimateFile(null); setMaterialsFile(null); } }}
+          inputRef={athRef}
+          accept=".ath"
         />
-        <FileDropZone
-          label="Zestawienie materiałów (Typ A)"
-          hint="Wyciągamy: materiały wg działów"
-          file={materialsFile}
-          onChange={setMaterialsFile}
-          inputRef={materialsRef}
-        />
+        {!athFile && (
+          <div>
+            <p className="text-xs text-gray-400 mb-2 text-center">— lub PDFy z NormaWExpert —</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FileDropZone
+                label="Kosztorys ofertowy (Typ B)"
+                hint="Wyciągamy: metadane projektu + pozycje kosztorysu"
+                file={estimateFile}
+                onChange={setEstimateFile}
+                inputRef={estimateRef}
+                accept=".pdf"
+              />
+              <FileDropZone
+                label="Zestawienie materiałów (Typ A)"
+                hint="Wyciągamy: materiały wg działów"
+                file={materialsFile}
+                onChange={setMaterialsFile}
+                inputRef={materialsRef}
+                accept=".pdf"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Notes */}
@@ -107,13 +130,14 @@ export default function UploadForm() {
 }
 
 function FileDropZone({
-  label, hint, file, onChange, inputRef,
+  label, hint, file, onChange, inputRef, accept = ".pdf",
 }: {
   label: string;
   hint: string;
   file: File | null;
   onChange: (f: File | null) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
+  accept?: string;
 }) {
   return (
     <div
@@ -125,13 +149,13 @@ function FileDropZone({
       onDrop={(e) => {
         e.preventDefault();
         const f = e.dataTransfer.files[0];
-        if (f?.type === "application/pdf") onChange(f);
+        if (f) onChange(f);
       }}
     >
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf"
+        accept={accept}
         className="hidden"
         onChange={(e) => onChange(e.target.files?.[0] ?? null)}
       />

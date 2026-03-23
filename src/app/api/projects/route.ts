@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { getSessionFromRequest } from "@/lib/auth";
 import { parsePdf } from "@/lib/pdf-parser";
+import { parseAth } from "@/lib/ath-parser";
 
 // GET /api/projects — list projects (admin: all, contractor: assigned)
 export async function GET(req: NextRequest) {
@@ -52,12 +53,13 @@ export async function POST(req: NextRequest) {
     const notes = (formData.get("notes") as string) || null;
     const estimateFile = formData.get("estimate") as File | null;
     const materialsFile = formData.get("materials") as File | null;
+    const athFile = formData.get("ath") as File | null;
 
     if (!title) {
       return NextResponse.json({ error: "Tytuł projektu jest wymagany" }, { status: 400 });
     }
 
-    // Parse PDFs
+    // Parse files
     let meta = {
       title,
       client_name: null as string | null,
@@ -80,31 +82,50 @@ export async function POST(req: NextRequest) {
     let costItems: CostItemData[] = [];
     let materials: MaterialData[] = [];
 
-    if (estimateFile) {
-      estimateFileName = estimateFile.name;
-      const buf = Buffer.from(await estimateFile.arrayBuffer());
-      const result = await parsePdf(buf);
-      if (result.type === "B") {
-        const { meta: m, chapters, items } = result.estimate;
-        meta.title = m.title || title;
-        meta.address = m.address;
-        meta.investor = m.investor;
-        meta.contractor_name = m.contractor_name;
-        totalNetto = m.total_netto;
-        vatRate = m.vat_rate;
-        vatAmount = m.vat_amount;
-        totalBrutto = m.total_brutto;
-        costChapters = chapters;
-        costItems = items;
+    if (athFile) {
+      // ATH file contains both estimate and materials
+      estimateFileName = athFile.name;
+      materialsFileName = athFile.name;
+      const buf = Buffer.from(await athFile.arrayBuffer());
+      const { estimate, materials: athMaterials } = parseAth(buf);
+      meta.title = estimate.meta.title || title;
+      meta.address = estimate.meta.address;
+      meta.investor = estimate.meta.investor;
+      meta.contractor_name = estimate.meta.contractor_name;
+      totalNetto = estimate.meta.total_netto;
+      vatRate = estimate.meta.vat_rate;
+      vatAmount = estimate.meta.vat_amount;
+      totalBrutto = estimate.meta.total_brutto;
+      costChapters = estimate.chapters;
+      costItems = estimate.items;
+      materials = athMaterials;
+    } else {
+      if (estimateFile) {
+        estimateFileName = estimateFile.name;
+        const buf = Buffer.from(await estimateFile.arrayBuffer());
+        const result = await parsePdf(buf);
+        if (result.type === "B") {
+          const { meta: m, chapters, items } = result.estimate;
+          meta.title = m.title || title;
+          meta.address = m.address;
+          meta.investor = m.investor;
+          meta.contractor_name = m.contractor_name;
+          totalNetto = m.total_netto;
+          vatRate = m.vat_rate;
+          vatAmount = m.vat_amount;
+          totalBrutto = m.total_brutto;
+          costChapters = chapters;
+          costItems = items;
+        }
       }
-    }
 
-    if (materialsFile) {
-      materialsFileName = materialsFile.name;
-      const buf = Buffer.from(await materialsFile.arrayBuffer());
-      const result = await parsePdf(buf);
-      if (result.type === "A") {
-        materials = result.materials;
+      if (materialsFile) {
+        materialsFileName = materialsFile.name;
+        const buf = Buffer.from(await materialsFile.arrayBuffer());
+        const result = await parsePdf(buf);
+        if (result.type === "A") {
+          materials = result.materials;
+        }
       }
     }
 

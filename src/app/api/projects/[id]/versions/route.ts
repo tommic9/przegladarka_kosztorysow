@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { getSessionFromRequest } from "@/lib/auth";
 import { parsePdf } from "@/lib/pdf-parser";
+import { parseAth } from "@/lib/ath-parser";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const notes = (formData.get("notes") as string) || null;
     const estimateFile = formData.get("estimate") as File | null;
     const materialsFile = formData.get("materials") as File | null;
+    const athFile = formData.get("ath") as File | null;
 
     // Get next version number
     const lastVersion = db
@@ -86,35 +88,56 @@ export async function POST(req: NextRequest, { params }: Params) {
     let costItems: CostItem[] = [];
     let materials: Material[] = [];
 
-    if (estimateFile) {
-      estimateFileName = estimateFile.name;
-      const buf = Buffer.from(await estimateFile.arrayBuffer());
-      const result = await parsePdf(buf);
-      if (result.type === "B") {
-        const { meta: m, chapters, items } = result.estimate;
-        totalNetto = m.total_netto;
-        vatRate = m.vat_rate;
-        vatAmount = m.vat_amount;
-        totalBrutto = m.total_brutto;
-        // Update project metadata
-        if (m.title || m.investor || m.address) {
-          db.prepare(
-            `UPDATE projects SET title = COALESCE(?, title), address = COALESCE(?, address),
-             investor = COALESCE(?, investor), contractor_name = COALESCE(?, contractor_name)
-             WHERE id = ?`
-          ).run(m.title, m.address, m.investor, m.contractor_name, projectId);
-        }
-        costChapters = chapters;
-        costItems = items;
+    if (athFile) {
+      // ATH contains both estimate and materials
+      estimateFileName = athFile.name;
+      materialsFileName = athFile.name;
+      const buf = Buffer.from(await athFile.arrayBuffer());
+      const { estimate, materials: athMaterials } = parseAth(buf);
+      totalNetto = estimate.meta.total_netto;
+      vatRate = estimate.meta.vat_rate;
+      vatAmount = estimate.meta.vat_amount;
+      totalBrutto = estimate.meta.total_brutto;
+      if (estimate.meta.title || estimate.meta.investor || estimate.meta.address) {
+        db.prepare(
+          `UPDATE projects SET title = COALESCE(?, title), address = COALESCE(?, address),
+           investor = COALESCE(?, investor), contractor_name = COALESCE(?, contractor_name)
+           WHERE id = ?`
+        ).run(estimate.meta.title, estimate.meta.address, estimate.meta.investor, estimate.meta.contractor_name, projectId);
       }
-    }
+      costChapters = estimate.chapters;
+      costItems = estimate.items;
+      materials = athMaterials;
+    } else {
+      if (estimateFile) {
+        estimateFileName = estimateFile.name;
+        const buf = Buffer.from(await estimateFile.arrayBuffer());
+        const result = await parsePdf(buf);
+        if (result.type === "B") {
+          const { meta: m, chapters, items } = result.estimate;
+          totalNetto = m.total_netto;
+          vatRate = m.vat_rate;
+          vatAmount = m.vat_amount;
+          totalBrutto = m.total_brutto;
+          if (m.title || m.investor || m.address) {
+            db.prepare(
+              `UPDATE projects SET title = COALESCE(?, title), address = COALESCE(?, address),
+               investor = COALESCE(?, investor), contractor_name = COALESCE(?, contractor_name)
+               WHERE id = ?`
+            ).run(m.title, m.address, m.investor, m.contractor_name, projectId);
+          }
+          costChapters = chapters;
+          costItems = items;
+        }
+      }
 
-    if (materialsFile) {
-      materialsFileName = materialsFile.name;
-      const buf = Buffer.from(await materialsFile.arrayBuffer());
-      const result = await parsePdf(buf);
-      if (result.type === "A") {
-        materials = result.materials;
+      if (materialsFile) {
+        materialsFileName = materialsFile.name;
+        const buf = Buffer.from(await materialsFile.arrayBuffer());
+        const result = await parsePdf(buf);
+        if (result.type === "A") {
+          materials = result.materials;
+        }
       }
     }
 
