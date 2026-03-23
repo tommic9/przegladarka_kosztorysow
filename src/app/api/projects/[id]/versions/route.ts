@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/db";
 import { getSessionFromRequest } from "@/lib/auth";
 import { parsePdf } from "@/lib/pdf-parser";
+import { parseAth } from "@/lib/ath-parser";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const notes = (formData.get("notes") as string) || null;
     const estimateFile = formData.get("estimate") as File | null;
     const materialsFile = formData.get("materials") as File | null;
+    const athFile = formData.get("ath") as File | null;
 
     // Get next version number
     const lastVersion = db
@@ -79,42 +81,63 @@ export async function POST(req: NextRequest, { params }: Params) {
     let materialsFileName: string | null = null;
 
     type CostChapter = { number: string; name: string; level: number; order_index: number; total_netto: number | null };
-    type CostItem = { lp: string; chapter_number: string; knr: string | null; name: string; unit: string | null; qty: number | null; unit_price: number | null; total_value_netto: number | null };
+    type CostItem = { lp: string; chapter_number: string; knr: string | null; name: string; unit: string | null; qty: number | null; unit_price: number | null; total_value_netto: number | null; measurement: string | null };
     type Material = { lp: number; index_code: string; name: string; unit: string | null; total_qty: number | null; unit_price: number | null; total_value: number | null; depts: { dept_number: string; dept_name: string; sub_dept_number: string | null; sub_dept_name: string | null; unit: string | null; qty: number | null; unit_price: number | null; value: number | null }[] };
 
     let costChapters: CostChapter[] = [];
     let costItems: CostItem[] = [];
     let materials: Material[] = [];
 
-    if (estimateFile) {
-      estimateFileName = estimateFile.name;
-      const buf = Buffer.from(await estimateFile.arrayBuffer());
-      const result = await parsePdf(buf);
-      if (result.type === "B") {
-        const { meta: m, chapters, items } = result.estimate;
-        totalNetto = m.total_netto;
-        vatRate = m.vat_rate;
-        vatAmount = m.vat_amount;
-        totalBrutto = m.total_brutto;
-        // Update project metadata
-        if (m.title || m.investor || m.address) {
-          db.prepare(
-            `UPDATE projects SET title = COALESCE(?, title), address = COALESCE(?, address),
-             investor = COALESCE(?, investor), contractor_name = COALESCE(?, contractor_name)
-             WHERE id = ?`
-          ).run(m.title, m.address, m.investor, m.contractor_name, projectId);
-        }
-        costChapters = chapters;
-        costItems = items;
+    if (athFile) {
+      // ATH contains both estimate and materials
+      estimateFileName = athFile.name;
+      materialsFileName = athFile.name;
+      const buf = Buffer.from(await athFile.arrayBuffer());
+      const { estimate, materials: athMaterials } = parseAth(buf);
+      totalNetto = estimate.meta.total_netto;
+      vatRate = estimate.meta.vat_rate;
+      vatAmount = estimate.meta.vat_amount;
+      totalBrutto = estimate.meta.total_brutto;
+      if (estimate.meta.title || estimate.meta.investor || estimate.meta.address) {
+        db.prepare(
+          `UPDATE projects SET title = COALESCE(?, title), address = COALESCE(?, address),
+           investor = COALESCE(?, investor), contractor_name = COALESCE(?, contractor_name)
+           WHERE id = ?`
+        ).run(estimate.meta.title, estimate.meta.address, estimate.meta.investor, estimate.meta.contractor_name, projectId);
       }
-    }
+      costChapters = estimate.chapters;
+      costItems = estimate.items;
+      materials = athMaterials;
+    } else {
+      if (estimateFile) {
+        estimateFileName = estimateFile.name;
+        const buf = Buffer.from(await estimateFile.arrayBuffer());
+        const result = await parsePdf(buf);
+        if (result.type === "B") {
+          const { meta: m, chapters, items } = result.estimate;
+          totalNetto = m.total_netto;
+          vatRate = m.vat_rate;
+          vatAmount = m.vat_amount;
+          totalBrutto = m.total_brutto;
+          if (m.title || m.investor || m.address) {
+            db.prepare(
+              `UPDATE projects SET title = COALESCE(?, title), address = COALESCE(?, address),
+               investor = COALESCE(?, investor), contractor_name = COALESCE(?, contractor_name)
+               WHERE id = ?`
+            ).run(m.title, m.address, m.investor, m.contractor_name, projectId);
+          }
+          costChapters = chapters;
+          costItems = items;
+        }
+      }
 
-    if (materialsFile) {
-      materialsFileName = materialsFile.name;
-      const buf = Buffer.from(await materialsFile.arrayBuffer());
-      const result = await parsePdf(buf);
-      if (result.type === "A") {
-        materials = result.materials;
+      if (materialsFile) {
+        materialsFileName = materialsFile.name;
+        const buf = Buffer.from(await materialsFile.arrayBuffer());
+        const result = await parsePdf(buf);
+        if (result.type === "A") {
+          materials = result.materials;
+        }
       }
     }
 
@@ -132,7 +155,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       `INSERT INTO cost_chapters (version_id, number, name, order_index, total_netto) VALUES (?, ?, ?, ?, ?)`
     );
     const insertItem = db.prepare(
-      `INSERT INTO cost_items (version_id, chapter_id, lp, knr, name, unit, qty, unit_price, total_value_netto) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO cost_items (version_id, chapter_id, lp, knr, name, unit, qty, unit_price, total_value_netto, measurement) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     const run = db.transaction(() => {
@@ -152,7 +175,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       for (const item of costItems) {
         const chapterId = chapterIdMap[item.chapter_number] ?? null;
         insertItem.run(versionId, chapterId, item.lp, item.knr, item.name,
-          item.unit, item.qty, item.unit_price, item.total_value_netto);
+          item.unit, item.qty, item.unit_price, item.total_value_netto,
+          item.measurement ?? null);
       }
 
       for (const mat of materials) {

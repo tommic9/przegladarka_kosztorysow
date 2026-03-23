@@ -8,7 +8,7 @@ import VersionDiff from "@/components/VersionDiff";
 type Material = { id: number; lp: number | null; index_code: string | null; name: string; unit: string | null; total_qty: number | null; unit_price: number | null; total_value: number | null };
 type MaterialDept = { id: number; material_id: number; dept_number: string; dept_name: string; sub_dept_number: string | null; sub_dept_name: string | null; qty: number | null; value: number | null };
 type CostChapter = { id: number; number: string; name: string; order_index: number; total_netto: number | null };
-type CostItem = { id: number; chapter_id: number | null; lp: string | null; knr: string | null; name: string; unit: string | null; qty: number | null; unit_price: number | null; total_value_netto: number | null };
+type CostItem = { id: number; chapter_id: number | null; lp: string | null; knr: string | null; name: string; unit: string | null; qty: number | null; unit_price: number | null; total_value_netto: number | null; measurement: string | null };
 type Version = { id: number; version_number: number; uploaded_at: string; notes: string | null };
 type Meta = { title: string; investor: string | null; address: string | null; contractor_name: string | null; vat_rate: number | null };
 

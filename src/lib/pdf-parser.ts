@@ -372,6 +372,7 @@ export type ParsedCostItem = {
   qty: number | null;
   unit_price: number | null;
   total_value_netto: number | null;
+  measurement: string | null;
 };
 
 export type ParsedEstimate = {
@@ -692,6 +693,7 @@ export function parseEstimate(text: string): ParsedEstimate {
         qty: parsed.qty,
         unit_price: parsed.unit_price,
         total_value_netto: parsed.total_value_netto,
+        measurement: null,
       });
     }
   }
@@ -706,6 +708,7 @@ export function parseEstimate(text: string): ParsedEstimate {
 export type ParseResult =
   | { type: "A"; materials: ParsedMaterial[] }
   | { type: "B"; estimate: ParsedEstimate }
+  | { type: "ATH"; estimate: ParsedEstimate; materials: ParsedMaterial[] }
   | { type: "unknown" };
 
 export async function parsePdf(buffer: Buffer): Promise<ParseResult> {

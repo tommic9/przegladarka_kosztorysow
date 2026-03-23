@@ -99,9 +99,13 @@ db.exec(`
     unit TEXT,
     qty REAL,
     unit_price REAL,
-    total_value_netto REAL
+    total_value_netto REAL,
+    measurement TEXT
   );
 `);
+
+// Migrations — add columns that may not exist in older databases
+try { db.exec(`ALTER TABLE cost_items ADD COLUMN measurement TEXT`); } catch { /* already exists */ }
 
 export default db;
 
@@ -182,4 +186,5 @@ export type CostItem = {
   qty: number | null;
   unit_price: number | null;
   total_value_netto: number | null;
+  measurement: string | null;
 };
