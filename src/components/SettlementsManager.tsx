@@ -116,7 +116,11 @@ export default function SettlementsManager({
               min="0"
               className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
             />
-            <button type="submit" disabled={saving} className="btn btn-primary btn-sm">
+            <button type="submit" disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 border border-blue-600 rounded-lg transition-colors disabled:opacity-60">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
               {saving ? "…" : "Dodaj"}
             </button>
           </div>
@@ -140,18 +144,28 @@ export default function SettlementsManager({
                 <span className="text-sm font-semibold tabular-nums">{fmt(s.amount)} zł</span>
                 <button
                   onClick={() => toggleStatus(s)}
-                  className={`text-xs px-2 py-0.5 rounded-full border font-medium transition-colors ${
+                  className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border font-medium transition-colors ${
                     s.status === "paid"
                       ? "bg-green-50 border-green-200 text-green-700 hover:bg-green-100"
                       : "bg-yellow-50 border-yellow-200 text-yellow-700 hover:bg-yellow-100"
                   }`}
                 >
+                  {s.status === "paid" ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  )}
                   {s.status === "paid" ? "Zapłacone" : "Do zapłaty"}
                 </button>
                 <button
                   onClick={() => handleDelete(s.id)}
-                  className="text-xs text-red-500 hover:text-red-700"
+                  className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 transition-colors"
                 >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6"/><path d="M14 11v6"/>
+                  </svg>
                   Usuń
                 </button>
               </div>
