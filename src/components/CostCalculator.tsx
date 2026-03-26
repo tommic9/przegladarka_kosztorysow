@@ -247,11 +247,6 @@ export default function CostCalculator({
                                 📐 {item.measurement}
                               </div>
                             )}
-                            {item.measurement && (
-                              <div className="text-xs text-gray-400 font-mono mt-0.5 print-only">
-                                Obmiar: {item.measurement}
-                              </div>
-                            )}
                           </td>
                           <td className="px-3 py-2 text-right text-gray-600">{item.unit || "—"}</td>
                           <td className="px-3 py-2 text-right text-gray-900">{item.qty !== null ? fmt(item.qty, 2) : "—"}</td>

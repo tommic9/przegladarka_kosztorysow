@@ -57,6 +57,8 @@ export default function MaterialsByDept({
   materials: Material[];
   depts: MaterialDept[];
 }) {
+  const visibleMaterials = materials.filter(m => (m.total_qty ?? 0) !== 0 && (m.total_value ?? 0) !== 0);
+
   // Build dept → materials map (top-level depts only)
   const deptMap = new Map<string, { number: string; name: string; items: { material: Material; dept: MaterialDept }[] }>();
 
@@ -66,7 +68,7 @@ export default function MaterialsByDept({
     if (!deptMap.has(key)) {
       deptMap.set(key, { number: dept.dept_number, name: dept.dept_name, items: [] });
     }
-    const mat = materials.find((m) => m.id === dept.material_id);
+    const mat = visibleMaterials.find((m) => m.id === dept.material_id);
     if (mat) deptMap.get(key)!.items.push({ material: mat, dept });
   }
 
@@ -90,7 +92,7 @@ export default function MaterialsByDept({
   }
 
   const sortedMaterials = useMemo(() => {
-    return [...materials].sort((a, b) => {
+    return [...visibleMaterials].sort((a, b) => {
       switch (sumSort.col) {
         case "lp":         return cmp(a.lp, b.lp, sumSort.dir);
         case "name":       return cmp(a.name, b.name, sumSort.dir);
@@ -100,9 +102,9 @@ export default function MaterialsByDept({
         case "total_value":return cmp(a.total_value, b.total_value, sumSort.dir);
       }
     });
-  }, [materials, sumSort]);
+  }, [visibleMaterials, sumSort]);
 
-  if (deptList.length === 0 && materials.length === 0) {
+  if (deptList.length === 0 && visibleMaterials.length === 0) {
     return <p className="text-sm text-gray-400 py-4">Brak danych o materiałach.</p>;
   }
 

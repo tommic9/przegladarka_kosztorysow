@@ -98,6 +98,10 @@ Weryfikacja: po uploadzie Typ A powinny być 41 materiałów, poprawnie przypisa
 
 Pełna instrukcja: `DEPLOY.md`
 
+**Aktualny adres (Quick Tunnel, tymczasowy):**
+`https://emma-trembl-newport-glory.trycloudflare.com`
+> Quick Tunnel zmienia URL przy każdym restarcie `cloudflared`. Docelowo stały adres po zakupie domeny.
+
 1. LXC Debian 12 na Proxmox (2 vCPU, 2GB RAM, 20GB NVMe)
 2. Node.js 20 LTS + PM2
 3. Cloudflare Tunnel (po zakupie domeny)

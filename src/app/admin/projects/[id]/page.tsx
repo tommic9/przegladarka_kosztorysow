@@ -3,6 +3,7 @@ import Link from "next/link";
 import db from "@/lib/db";
 import ProjectAccessManager from "@/components/ProjectAccessManager";
 import AddVersionForm from "@/components/AddVersionForm";
+import ProjectTabs from "@/components/ProjectTabs";
 
 function fmt(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
@@ -36,6 +37,20 @@ export default async function AdminProjectPage({ params }: PageProps) {
   const itemCount = latestVersion
     ? (db.prepare("SELECT COUNT(*) as c FROM cost_items WHERE version_id = ?").get(latestVersion.id) as { c: number }).c
     : 0;
+
+  let materials: unknown[] = [];
+  let depts: unknown[] = [];
+  let chapters: unknown[] = [];
+  let items: unknown[] = [];
+
+  if (latestVersion) {
+    materials = db.prepare("SELECT * FROM materials WHERE version_id = ? ORDER BY lp").all(latestVersion.id);
+    depts = db.prepare(
+      `SELECT md.* FROM material_depts md JOIN materials m ON m.id = md.material_id WHERE m.version_id = ?`
+    ).all(latestVersion.id);
+    chapters = db.prepare("SELECT * FROM cost_chapters WHERE version_id = ? ORDER BY order_index").all(latestVersion.id);
+    items = db.prepare("SELECT * FROM cost_items WHERE version_id = ? ORDER BY lp").all(latestVersion.id);
+  }
 
   const allContractors = db
     .prepare("SELECT id, name, email FROM users WHERE role = 'contractor' ORDER BY name")
@@ -137,6 +152,30 @@ export default async function AdminProjectPage({ params }: PageProps) {
           ))}
         </dl>
       </div>
+
+      {/* Contractor view */}
+      {latestVersion && (
+        <div>
+          <h2 className="text-base font-semibold text-gray-700 mb-4">Podgląd widoku wykonawcy</h2>
+          <ProjectTabs
+            materials={materials as Parameters<typeof ProjectTabs>[0]["materials"]}
+            depts={depts as Parameters<typeof ProjectTabs>[0]["depts"]}
+            chapters={chapters as Parameters<typeof ProjectTabs>[0]["chapters"]}
+            items={items as Parameters<typeof ProjectTabs>[0]["items"]}
+            versions={versions}
+            projectId={projectId}
+            currentVersionId={latestVersion.id}
+            meta={{
+              title: project.title,
+              investor: project.investor,
+              address: project.address,
+              contractor_name: project.contractor_name,
+              vat_rate: latestVersion.vat_rate ?? null,
+            }}
+            versionDate={latestVersion.uploaded_at}
+          />
+        </div>
+      )}
     </div>
   );
 }
