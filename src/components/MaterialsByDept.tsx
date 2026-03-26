@@ -106,8 +106,9 @@ export default function MaterialsByDept({
     return map;
   }, [depts]);
 
-  // Determine filter mode
-  const useChapterFilter = !!(chapters && chapters.length > 0);
+  // Determine filter mode — chapter filter requires dept data to be meaningful
+  const hasDeptData = depts.length > 0;
+  const useChapterFilter = !!(chapters && chapters.length > 0) && hasDeptData;
   const sortedChapters = useMemo(
     () => chapters ? [...chapters].sort((a, b) => a.order_index - b.order_index) : [],
     [chapters]
