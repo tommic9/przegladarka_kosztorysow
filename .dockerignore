@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.gitignore
+.env.local
+data
+uploads
+Sample
+*.pdf
+*.ath
+DEPLOY.md
+README.md
+.claude
