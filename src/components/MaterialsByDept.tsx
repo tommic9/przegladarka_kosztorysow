@@ -13,13 +13,17 @@ type Material = {
   unit: string | null; total_qty: number | null; unit_price: number | null; total_value: number | null;
 };
 
-type CostChapter = { id: number; number: string; name: string; order_index: number; total_netto: number | null };
-
 type DeptEntry = { number: string; name: string; items: { material: Material; dept: MaterialDept }[] };
 
 type SortDir = "asc" | "desc";
 type SummaryCol = "lp" | "name" | "unit" | "total_qty" | "unit_price" | "total_value";
 type DeptCol = "lp" | "name" | "unit" | "qty" | "unit_price" | "value";
+
+// ── Filter tree node ──────────────────────────────────────────────────────────
+type FilterDept = {
+  number: string; name: string;
+  subs: { number: string; name: string }[];
+};
 
 function fmt(n: number | null | undefined, decimals = 2): string {
   if (n === null || n === undefined) return "—";
@@ -29,18 +33,14 @@ function fmt(n: number | null | undefined, decimals = 2): string {
   }).format(n);
 }
 
-function SortTh({
-  label, col, active, dir, align = "left", onClick,
-}: {
+function SortTh({ label, col, active, dir, align = "left", onClick }: {
   label: string; col: string; active: boolean; dir: SortDir;
   align?: "left" | "right"; onClick: () => void;
 }) {
   return (
-    <th
-      onClick={onClick}
+    <th onClick={onClick}
       className={`px-4 py-2 text-xs font-medium cursor-pointer select-none whitespace-nowrap
-        text-${align} ${active ? "text-blue-600" : "text-gray-500 hover:text-gray-800"}`}
-    >
+        text-${align} ${active ? "text-blue-600" : "text-gray-500 hover:text-gray-800"}`}>
       {label}
       <span className="ml-1 opacity-60">{active ? (dir === "asc" ? "▲" : "▼") : "⇅"}</span>
     </th>
@@ -62,186 +62,167 @@ function IndeterminateCheckbox({ checked, indeterminate, onChange }: {
     if (ref.current) ref.current.indeterminate = !checked && indeterminate;
   }, [checked, indeterminate]);
   return (
-    <input
-      ref={ref}
-      type="checkbox"
-      checked={checked}
-      onChange={onChange}
-      className="h-4 w-4 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0"
-    />
+    <input ref={ref} type="checkbox" checked={checked} onChange={onChange}
+      className="h-4 w-4 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0" />
   );
 }
 
 export default function MaterialsByDept({
-  materials,
-  depts,
-  chapters,
+  materials, depts,
 }: {
   materials: Material[];
   depts: MaterialDept[];
-  chapters?: CostChapter[];
 }) {
-  const allMaterials = materials.filter(m => (m.total_qty ?? 0) !== 0 && (m.total_value ?? 0) !== 0);
+  const allMaterials = useMemo(
+    () => materials.filter(m => (m.total_qty ?? 0) !== 0 && (m.total_value ?? 0) !== 0),
+    [materials]
+  );
 
-  // Build dept → materials map (top-level depts only) — for accordion sections
-  const deptMap = new Map<string, DeptEntry>();
-  for (const dept of depts) {
-    if (dept.sub_dept_number) continue;
-    const key = dept.dept_number;
-    if (!deptMap.has(key)) {
-      deptMap.set(key, { number: dept.dept_number, name: dept.dept_name, items: [] });
+  // ── Build accordion dept list ────────────────────────────────────────────────
+  const deptMap = useMemo(() => {
+    const map = new Map<string, DeptEntry>();
+    for (const dept of depts) {
+      if (dept.sub_dept_number) continue;
+      const key = dept.dept_number;
+      if (!map.has(key)) map.set(key, { number: dept.dept_number, name: dept.dept_name, items: [] });
+      const mat = allMaterials.find(m => m.id === dept.material_id);
+      if (mat) map.get(key)!.items.push({ material: mat, dept });
     }
-    const mat = allMaterials.find((m) => m.id === dept.material_id);
-    if (mat) deptMap.get(key)!.items.push({ material: mat, dept });
-  }
-  const deptList = Array.from(deptMap.values()).sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
+    return map;
+  }, [depts, allMaterials]);
 
-  // Build materialId → dept entries list (for chapter-based filtering)
-  const matDeptEntries = useMemo(() => {
-    const map = new Map<number, { dept_number: string; sub_dept_number: string | null }[]>();
+  const deptList = useMemo(
+    () => Array.from(deptMap.values()).sort((a, b) => parseFloat(a.number) - parseFloat(b.number)),
+    [deptMap]
+  );
+
+  // ── Build filter tree (dept → sub-depts) ─────────────────────────────────────
+  const filterTree = useMemo((): FilterDept[] => {
+    const parentMap = new Map<string, FilterDept>();
+    for (const d of depts) {
+      if (!parentMap.has(d.dept_number)) {
+        parentMap.set(d.dept_number, { number: d.dept_number, name: d.dept_name, subs: [] });
+      }
+      if (d.sub_dept_number) {
+        const parent = parentMap.get(d.dept_number)!;
+        if (!parent.subs.some(s => s.number === d.sub_dept_number)) {
+          parent.subs.push({ number: d.sub_dept_number, name: d.sub_dept_name ?? d.sub_dept_number });
+        }
+      }
+    }
+    return Array.from(parentMap.values())
+      .sort((a, b) => parseFloat(a.number) - parseFloat(b.number))
+      .map(p => ({ ...p, subs: [...p.subs].sort((a, b) => parseFloat(a.number) - parseFloat(b.number)) }));
+  }, [depts]);
+
+  // All selectable keys = dept_numbers + sub_dept_numbers
+  const allFilterKeys = useMemo(() => {
+    const keys = new Set<string>();
+    filterTree.forEach(p => {
+      keys.add(p.number);
+      p.subs.forEach(s => keys.add(s.number));
+    });
+    return keys;
+  }, [filterTree]);
+
+  // ── Selection state ──────────────────────────────────────────────────────────
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set(allFilterKeys));
+  const [expandedFilter, setExpandedFilter] = useState<Set<string>>(new Set());
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  const isFiltered = selectedKeys.size < allFilterKeys.size;
+
+  // materialId → [{dept_number, sub_dept_number}]
+  const matDeptIndex = useMemo(() => {
+    const map = new Map<number, { dn: string; sn: string | null }[]>();
     for (const d of depts) {
       if (!map.has(d.material_id)) map.set(d.material_id, []);
-      map.get(d.material_id)!.push({ dept_number: d.dept_number, sub_dept_number: d.sub_dept_number });
+      map.get(d.material_id)!.push({ dn: d.dept_number, sn: d.sub_dept_number });
     }
     return map;
   }, [depts]);
 
-  // Determine filter mode — chapter filter requires dept data to be meaningful
-  const hasDeptData = depts.length > 0;
-  const useChapterFilter = !!(chapters && chapters.length > 0) && hasDeptData;
-  const sortedChapters = useMemo(
-    () => chapters ? [...chapters].sort((a, b) => a.order_index - b.order_index) : [],
-    [chapters]
-  );
-  const allChapterNums = useMemo(() => new Set(sortedChapters.map(c => c.number)), [sortedChapters]);
-
-  // Build chapter tree: parents (no dot) → sub-chapters (with dot)
-  const chapterTree = useMemo(() => {
-    const parents = sortedChapters.filter(c => !c.number.includes("."));
-    return parents.map(p => ({
-      ...p,
-      subs: sortedChapters.filter(c => c.number.startsWith(p.number + ".")),
-    }));
-  }, [sortedChapters]);
-
-  const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
-  function toggleChapterExpand(num: string) {
-    setExpandedChapters(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n; });
-  }
-
-  // ── Filter state ──
-  const [selectedChapters, setSelectedChapters] = useState<Set<string>>(
-    () => new Set(sortedChapters.map(c => c.number))
-  );
-  const allIds = useMemo(() => new Set(allMaterials.map(m => m.id)), [allMaterials]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(
-    () => new Set(allMaterials.map(m => m.id))
-  );
-  const [panelOpen, setPanelOpen] = useState(false);
-  // For material-based mode: expand depts in filter
-  const [expandedDepts, setExpandedDepts] = useState<Set<string>>(new Set());
-
-  const isChapterFiltered = useChapterFilter && selectedChapters.size < allChapterNums.size;
-  const isMaterialFiltered = !useChapterFilter && (selectedIds.size < allIds.size || selectedIds.size === 0);
-  const isFiltered = isChapterFiltered || isMaterialFiltered;
-
-  const filteredMaterials = useMemo(() => {
-    if (useChapterFilter) {
-      if (!isChapterFiltered) return allMaterials;
-      return allMaterials.filter(m => {
-        const entries = matDeptEntries.get(m.id) ?? [];
-        return entries.some(e =>
-          selectedChapters.has(e.dept_number) ||
-          (e.sub_dept_number && selectedChapters.has(e.sub_dept_number))
-        );
-      });
-    }
-    return isMaterialFiltered ? allMaterials.filter(m => selectedIds.has(m.id)) : allMaterials;
-  }, [useChapterFilter, isChapterFiltered, isMaterialFiltered, allMaterials, matDeptEntries, selectedChapters, selectedIds]);
-
-  const filteredDeptList = useMemo(() =>
-    deptList
-      .map(dept => ({
-        ...dept,
-        items: isFiltered
-          ? dept.items.filter(i => filteredMaterials.some(m => m.id === i.material.id))
-          : dept.items,
-      }))
-      .filter(dept => dept.items.length > 0),
-    [deptList, isFiltered, filteredMaterials]
-  );
-
-  // Chapter filter helpers
-  function toggleParentChapter(num: string, subNums: string[]) {
-    const checked = selectedChapters.has(num);
-    setSelectedChapters(prev => {
-      const n = new Set(prev);
-      if (checked) { n.delete(num); subNums.forEach(s => n.delete(s)); }
-      else          { n.add(num);    subNums.forEach(s => n.add(s)); }
-      return n;
-    });
-  }
-  function toggleSubChapter(num: string) {
-    setSelectedChapters(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n; });
-  }
-
-  // Material filter helpers
-  function isDeptAllSel(dept: DeptEntry) { return dept.items.every(i => selectedIds.has(i.material.id)); }
-  function isDeptAnySel(dept: DeptEntry) { return dept.items.some(i => selectedIds.has(i.material.id)); }
-  function toggleDept(dept: DeptEntry) {
-    const allSel = isDeptAllSel(dept);
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      for (const { material: m } of dept.items) allSel ? next.delete(m.id) : next.add(m.id);
-      return next;
-    });
-  }
-  function toggleMaterial(id: number) {
-    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  }
-  function toggleDeptExpand(num: string) {
-    setExpandedDepts(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n; });
-  }
-
-  // ── Accordion open state ──
-  const allKeys = ["summary", ...deptList.map((d) => d.number)];
-  const [openSet, setOpenSet] = useState<Set<string>>(() => new Set(allKeys));
-  const toggle = (key: string) =>
-    setOpenSet((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
-  const allOpen = openSet.has("summary") && deptList.every((d) => openSet.has(d.number));
-
-  // ── Summary sort state ──
-  const [sumSort, setSumSort] = useState<{ col: SummaryCol; dir: SortDir }>({ col: "lp", dir: "asc" });
-  function toggleSumSort(col: SummaryCol) {
-    setSumSort((prev) => prev.col === col
-      ? { col, dir: prev.dir === "asc" ? "desc" : "asc" }
-      : { col, dir: "asc" }
+  function materialVisible(id: number): boolean {
+    const entries = matDeptIndex.get(id);
+    if (!entries || entries.length === 0) return true; // no dept data → always show
+    return entries.some(e =>
+      selectedKeys.has(e.dn) ||                          // parent selected
+      (e.sn !== null && selectedKeys.has(e.sn))          // or specific sub selected
     );
   }
 
-  const sortedMaterials = useMemo(() => {
-    return [...filteredMaterials].sort((a, b) => {
-      switch (sumSort.col) {
-        case "lp":          return cmp(a.lp, b.lp, sumSort.dir);
-        case "name":        return cmp(a.name, b.name, sumSort.dir);
-        case "unit":        return cmp(a.unit, b.unit, sumSort.dir);
-        case "total_qty":   return cmp(a.total_qty, b.total_qty, sumSort.dir);
-        case "unit_price":  return cmp(a.unit_price, b.unit_price, sumSort.dir);
-        case "total_value": return cmp(a.total_value, b.total_value, sumSort.dir);
-      }
+  const filteredMaterials = useMemo(
+    () => isFiltered ? allMaterials.filter(m => materialVisible(m.id)) : allMaterials,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isFiltered, allMaterials, selectedKeys, matDeptIndex]
+  );
+
+  const filteredDeptList = useMemo(
+    () => deptList
+      .map(d => ({ ...d, items: isFiltered ? d.items.filter(i => materialVisible(i.material.id)) : d.items }))
+      .filter(d => d.items.length > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deptList, isFiltered, selectedKeys, matDeptIndex]
+  );
+
+  // ── Filter helpers ───────────────────────────────────────────────────────────
+  function allSubKeys(p: FilterDept) { return p.subs.map(s => s.number); }
+
+  function toggleParent(p: FilterDept) {
+    const subs = allSubKeys(p);
+    const checked = selectedKeys.has(p.number);
+    setSelectedKeys(prev => {
+      const n = new Set(prev);
+      if (checked) { n.delete(p.number); subs.forEach(s => n.delete(s)); }
+      else          { n.add(p.number);    subs.forEach(s => n.add(s)); }
+      return n;
     });
-  }, [filteredMaterials, sumSort]);
+  }
+
+  function toggleSub(subNum: string) {
+    setSelectedKeys(prev => { const n = new Set(prev); n.has(subNum) ? n.delete(subNum) : n.add(subNum); return n; });
+  }
+
+  function isParentChecked(p: FilterDept) { return selectedKeys.has(p.number); }
+  function isParentIndeterminate(p: FilterDept) {
+    if (selectedKeys.has(p.number)) return false;
+    return allSubKeys(p).some(s => selectedKeys.has(s));
+  }
+
+  function toggleFilterExpand(num: string) {
+    setExpandedFilter(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n; });
+  }
+
+  // ── Accordion (materials view) ───────────────────────────────────────────────
+  const allKeys = ["summary", ...deptList.map(d => d.number)];
+  const [openSet, setOpenSet] = useState<Set<string>>(() => new Set(allKeys));
+  const toggle = (key: string) =>
+    setOpenSet(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const allOpen = openSet.has("summary") && deptList.every(d => openSet.has(d.number));
+
+  // ── Summary sort ─────────────────────────────────────────────────────────────
+  const [sumSort, setSumSort] = useState<{ col: SummaryCol; dir: SortDir }>({ col: "lp", dir: "asc" });
+  function toggleSumSort(col: SummaryCol) {
+    setSumSort(prev => prev.col === col ? { col, dir: prev.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" });
+  }
+
+  const sortedMaterials = useMemo(() => [...filteredMaterials].sort((a, b) => {
+    switch (sumSort.col) {
+      case "lp":          return cmp(a.lp, b.lp, sumSort.dir);
+      case "name":        return cmp(a.name, b.name, sumSort.dir);
+      case "unit":        return cmp(a.unit, b.unit, sumSort.dir);
+      case "total_qty":   return cmp(a.total_qty, b.total_qty, sumSort.dir);
+      case "unit_price":  return cmp(a.unit_price, b.unit_price, sumSort.dir);
+      case "total_value": return cmp(a.total_value, b.total_value, sumSort.dir);
+    }
+  }), [filteredMaterials, sumSort]);
 
   if (deptList.length === 0 && allMaterials.length === 0) {
     return <p className="text-sm text-gray-400 py-4">Brak danych o materiałach.</p>;
   }
 
   const grandTotal = filteredMaterials.reduce((sum, m) => sum + (m.total_value ?? 0), 0);
-
-  // Filter panel summary label
-  const filterLabel = useChapterFilter
-    ? `${selectedChapters.size}/${allChapterNums.size} rozdziałów`
-    : `${selectedIds.size}/${allIds.size} pozycji`;
+  const noDeptData = filterTree.length === 0;
 
   return (
     <div className="lg:flex lg:gap-5 lg:items-start">
@@ -250,15 +231,13 @@ export default function MaterialsByDept({
       <div className="lg:w-60 lg:shrink-0 lg:sticky lg:top-4 mb-4 lg:mb-0">
 
         {/* Mobile toggle */}
-        <button
-          onClick={() => setPanelOpen(!panelOpen)}
-          className="lg:hidden w-full flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        >
+        <button onClick={() => setPanelOpen(!panelOpen)}
+          className="lg:hidden w-full flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
           <span className="flex items-center gap-2">
             <span>Filtruj zakres</span>
             {isFiltered && (
               <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                {filterLabel}
+                {selectedKeys.size}/{allFilterKeys.size}
               </span>
             )}
           </span>
@@ -267,176 +246,100 @@ export default function MaterialsByDept({
 
         {/* Panel body */}
         <div className={`${panelOpen ? "block mt-2" : "hidden"} lg:block bg-white border border-gray-200 rounded-xl overflow-hidden`}>
-          {/* Header */}
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <span className="text-sm font-semibold text-gray-800">Zakres roboczy</span>
             {isFiltered ? (
               <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                {filterLabel}
+                {selectedKeys.size}/{allFilterKeys.size}
               </span>
             ) : (
-              <span className="text-xs text-gray-400">
-                {useChapterFilter ? `${allChapterNums.size} rozdz.` : `${allIds.size} poz.`}
-              </span>
+              <span className="text-xs text-gray-400">{allFilterKeys.size} działów</span>
             )}
           </div>
 
-          {/* Actions */}
-          <div className="px-4 py-2 flex items-center gap-3 border-b border-gray-100">
-            <button
-              onClick={() => useChapterFilter
-                ? setSelectedChapters(new Set(allChapterNums))
-                : setSelectedIds(new Set(allIds))
-              }
-              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-            >
-              Zaznacz wszystko
-            </button>
-            <span className="text-gray-200">|</span>
-            <button
-              onClick={() => useChapterFilter
-                ? setSelectedChapters(new Set())
-                : setSelectedIds(new Set())
-              }
-              className="text-xs text-gray-500 hover:text-gray-700"
-            >
-              Odznacz
-            </button>
-          </div>
-
-          {/* ── Chapter-based filter (hierarchical) ── */}
-          {useChapterFilter ? (
-            <div className="max-h-[60vh] lg:max-h-[calc(100vh-260px)] overflow-y-auto divide-y divide-gray-50">
-              {chapterTree.map(parent => {
-                const subNums = parent.subs.map(s => s.number);
-                const parentChecked = selectedChapters.has(parent.number);
-                const someSubChecked = subNums.some(s => selectedChapters.has(s));
-                const expanded = expandedChapters.has(parent.number);
-                return (
-                  <div key={parent.number}>
-                    <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50">
-                      <IndeterminateCheckbox
-                        checked={parentChecked}
-                        indeterminate={someSubChecked}
-                        onChange={() => toggleParentChapter(parent.number, subNums)}
-                      />
-                      <button
-                        onClick={() => subNums.length > 0 && toggleChapterExpand(parent.number)}
-                        className="flex-1 flex items-center justify-between text-left min-w-0"
-                      >
-                        <div className="min-w-0">
-                          <span className="text-xs font-semibold text-gray-500">{parent.number}.</span>
-                          {" "}
-                          <span className="text-xs font-medium text-gray-800 leading-tight">{parent.name}</span>
-                          {parent.total_netto !== null && (
-                            <div className="text-xs text-gray-400">{fmt(parent.total_netto)} zł</div>
-                          )}
-                        </div>
-                        {subNums.length > 0 && (
-                          <span className="text-gray-400 text-xs ml-1 shrink-0">{expanded ? "▲" : "▼"}</span>
-                        )}
-                      </button>
-                    </div>
-                    {expanded && subNums.length > 0 && (
-                      <div className="bg-gray-50/60 divide-y divide-gray-100 pb-1">
-                        {parent.subs.map(sub => (
-                          <label key={sub.number} className="flex items-start gap-2 pl-8 pr-3 py-2 hover:bg-gray-100 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={selectedChapters.has(sub.number)}
-                              onChange={() => toggleSubChapter(sub.number)}
-                              className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0"
-                            />
-                            <div className="min-w-0">
-                              <span className="text-xs text-gray-500">{sub.number}.</span>
-                              {" "}
-                              <span className="text-xs text-gray-700 leading-tight">{sub.name}</span>
-                              {sub.total_netto !== null && (
-                                <div className="text-xs text-gray-400">{fmt(sub.total_netto)} zł</div>
-                              )}
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          {noDeptData ? (
+            <p className="px-4 py-4 text-xs text-gray-400 leading-relaxed">
+              Brak przypisania materiałów do działów.<br />
+              Wgraj ponownie plik ATH lub PDF zestawienia materiałów.
+            </p>
           ) : (
-            /* ── Material/dept-based filter (fallback) ── */
-            <div className="max-h-[60vh] lg:max-h-[calc(100vh-260px)] overflow-y-auto divide-y divide-gray-50">
-              {deptList.length === 0 ? (
-                <p className="px-4 py-3 text-xs text-gray-400">Brak przypisanych działów.</p>
-              ) : (
-                deptList.map(dept => {
-                  const allSel = isDeptAllSel(dept);
-                  const anySel = isDeptAnySel(dept);
-                  const expanded = expandedDepts.has(dept.number);
+            <>
+              <div className="px-4 py-2 flex items-center gap-3 border-b border-gray-100">
+                <button onClick={() => setSelectedKeys(new Set(allFilterKeys))}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+                  Zaznacz wszystko
+                </button>
+                <span className="text-gray-200">|</span>
+                <button onClick={() => setSelectedKeys(new Set())}
+                  className="text-xs text-gray-500 hover:text-gray-700">
+                  Odznacz
+                </button>
+              </div>
+
+              <div className="max-h-[60vh] lg:max-h-[calc(100vh-260px)] overflow-y-auto">
+                {filterTree.map(parent => {
+                  const expanded = expandedFilter.has(parent.number);
+                  const hasSubs = parent.subs.length > 0;
                   return (
-                    <div key={dept.number}>
+                    <div key={parent.number} className="border-b border-gray-50 last:border-0">
                       <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50">
                         <IndeterminateCheckbox
-                          checked={allSel}
-                          indeterminate={anySel}
-                          onChange={() => toggleDept(dept)}
+                          checked={isParentChecked(parent)}
+                          indeterminate={isParentIndeterminate(parent)}
+                          onChange={() => toggleParent(parent)}
                         />
                         <button
-                          onClick={() => toggleDeptExpand(dept.number)}
-                          className="flex-1 flex items-center justify-between text-left min-w-0"
+                          onClick={() => hasSubs && toggleFilterExpand(parent.number)}
+                          className={`flex-1 flex items-center justify-between text-left min-w-0 ${hasSubs ? "" : "cursor-default"}`}
                         >
                           <span className="text-xs font-medium text-gray-800 leading-tight truncate pr-1">
-                            {dept.number}. {dept.name}
+                            {parent.number}. {parent.name}
                           </span>
-                          <span className="text-gray-400 text-xs shrink-0">{expanded ? "▲" : "▼"}</span>
+                          {hasSubs && (
+                            <span className="text-gray-400 text-xs shrink-0">{expanded ? "▲" : "▼"}</span>
+                          )}
                         </button>
                       </div>
-                      {expanded && (
+
+                      {hasSubs && expanded && (
                         <div className="bg-gray-50/60 pb-1">
-                          {dept.items.map(({ material: m }) => (
-                            <label key={m.id} className="flex items-start gap-2 px-4 py-1.5 hover:bg-gray-100 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={selectedIds.has(m.id)}
-                                onChange={() => toggleMaterial(m.id)}
-                                className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0"
-                              />
-                              <span className="text-xs text-gray-700 leading-tight">{m.name}</span>
+                          {parent.subs.map(sub => (
+                            <label key={sub.number}
+                              className="flex items-start gap-2 pl-8 pr-3 py-2 hover:bg-gray-100 cursor-pointer">
+                              <input type="checkbox"
+                                checked={selectedKeys.has(sub.number)}
+                                onChange={() => toggleSub(sub.number)}
+                                className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0" />
+                              <span className="text-xs text-gray-700 leading-tight">
+                                {sub.number}. {sub.name}
+                              </span>
                             </label>
                           ))}
                         </div>
                       )}
                     </div>
                   );
-                })
-              )}
-            </div>
-          )}
+                })}
+              </div>
 
-          {/* Active filter footer */}
-          {isFiltered && (
-            <div className="px-4 py-2.5 border-t border-gray-100 bg-blue-50/50">
-              <p className="text-xs text-blue-700">
-                Wartość filtra: <span className="font-semibold">{fmt(grandTotal)} zł</span>
-              </p>
-              <button
-                onClick={() => useChapterFilter
-                  ? setSelectedChapters(new Set(allChapterNums))
-                  : setSelectedIds(new Set(allIds))
-                }
-                className="text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800 mt-0.5"
-              >
-                Pokaż wszystkie
-              </button>
-            </div>
+              {isFiltered && (
+                <div className="px-4 py-2.5 border-t border-gray-100 bg-blue-50/50">
+                  <p className="text-xs text-blue-700">
+                    Wartość zakresu: <span className="font-semibold">{fmt(grandTotal)} zł</span>
+                  </p>
+                  <button onClick={() => setSelectedKeys(new Set(allFilterKeys))}
+                    className="text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800 mt-0.5">
+                    Pokaż wszystkie
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
 
       {/* ══ Materials content ══ */}
       <div className="flex-1 min-w-0 space-y-4">
-
-        {/* Toolbar */}
         <div className="flex items-center justify-between">
           <p className="text-sm text-gray-500">
             {isFiltered
@@ -444,20 +347,16 @@ export default function MaterialsByDept({
               : <>{allMaterials.length} pozycji materiałowych</>
             }
           </p>
-          <button
-            onClick={allOpen ? () => setOpenSet(new Set()) : () => setOpenSet(new Set(allKeys))}
-            className="btn btn-secondary btn-sm"
-          >
+          <button onClick={allOpen ? () => setOpenSet(new Set()) : () => setOpenSet(new Set(allKeys))}
+            className="btn btn-secondary btn-sm">
             {allOpen ? "Zwiń wszystko" : "Rozwiń wszystko"}
           </button>
         </div>
 
         {/* Zestawienie całościowe */}
         <div className="border border-blue-100 rounded-xl overflow-hidden">
-          <button
-            onClick={() => toggle("summary")}
-            className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 hover:bg-blue-100 transition-colors text-left"
-          >
+          <button onClick={() => toggle("summary")}
+            className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 hover:bg-blue-100 transition-colors text-left">
             <span className="font-semibold text-blue-900 text-sm">Zestawienie całościowe materiałów</span>
             <div className="flex items-center gap-4">
               <span className="text-sm text-blue-700 font-medium">{fmt(grandTotal)} zł</span>
@@ -470,11 +369,11 @@ export default function MaterialsByDept({
                 <thead>
                   <tr className="border-b border-gray-100 bg-white">
                     <SortTh label="Lp."              col="lp"          active={sumSort.col === "lp"}          dir={sumSort.dir} onClick={() => toggleSumSort("lp")} />
-                    <SortTh label="Nazwa materiału"  col="name"         active={sumSort.col === "name"}        dir={sumSort.dir} onClick={() => toggleSumSort("name")} />
-                    <SortTh label="j.m."             col="unit"         active={sumSort.col === "unit"}        dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit")} />
-                    <SortTh label="Ilość łączna"     col="total_qty"    active={sumSort.col === "total_qty"}   dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_qty")} />
-                    <SortTh label="Cena jedn. netto" col="unit_price"   active={sumSort.col === "unit_price"}  dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit_price")} />
-                    <SortTh label="Wartość netto"    col="total_value"  active={sumSort.col === "total_value"} dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_value")} />
+                    <SortTh label="Nazwa materiału"  col="name"        active={sumSort.col === "name"}        dir={sumSort.dir} onClick={() => toggleSumSort("name")} />
+                    <SortTh label="j.m."             col="unit"        active={sumSort.col === "unit"}        dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit")} />
+                    <SortTh label="Ilość łączna"     col="total_qty"   active={sumSort.col === "total_qty"}   dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_qty")} />
+                    <SortTh label="Cena jedn. netto" col="unit_price"  active={sumSort.col === "unit_price"}  dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit_price")} />
+                    <SortTh label="Wartość netto"    col="total_value" active={sumSort.col === "total_value"} dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_value")} />
                   </tr>
                 </thead>
                 <tbody>
@@ -500,14 +399,8 @@ export default function MaterialsByDept({
           )}
         </div>
 
-        {/* Działy */}
-        {filteredDeptList.map((dept) => (
-          <DeptSection
-            key={dept.number}
-            dept={dept}
-            isOpen={openSet.has(dept.number)}
-            onToggle={() => toggle(dept.number)}
-          />
+        {filteredDeptList.map(dept => (
+          <DeptSection key={dept.number} dept={dept} isOpen={openSet.has(dept.number)} onToggle={() => toggle(dept.number)} />
         ))}
 
         {isFiltered && filteredMaterials.length === 0 && (
@@ -518,43 +411,30 @@ export default function MaterialsByDept({
   );
 }
 
-function DeptSection({
-  dept, isOpen, onToggle,
-}: {
-  dept: DeptEntry;
-  isOpen: boolean;
-  onToggle: () => void;
+function DeptSection({ dept, isOpen, onToggle }: {
+  dept: DeptEntry; isOpen: boolean; onToggle: () => void;
 }) {
   const [sort, setSort] = useState<{ col: DeptCol; dir: SortDir }>({ col: "lp", dir: "asc" });
-
   function toggleSort(col: DeptCol) {
-    setSort((prev) => prev.col === col
-      ? { col, dir: prev.dir === "asc" ? "desc" : "asc" }
-      : { col, dir: "asc" }
-    );
+    setSort(prev => prev.col === col ? { col, dir: prev.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" });
   }
-
-  const sorted = useMemo(() => {
-    return [...dept.items].sort((a, b) => {
-      switch (sort.col) {
-        case "lp":         return cmp(a.material.lp, b.material.lp, sort.dir);
-        case "name":       return cmp(a.material.name, b.material.name, sort.dir);
-        case "unit":       return cmp(a.material.unit, b.material.unit, sort.dir);
-        case "qty":        return cmp(a.dept.qty, b.dept.qty, sort.dir);
-        case "unit_price": return cmp(a.material.unit_price, b.material.unit_price, sort.dir);
-        case "value":      return cmp(a.dept.value, b.dept.value, sort.dir);
-      }
-    });
-  }, [dept.items, sort]);
+  const sorted = useMemo(() => [...dept.items].sort((a, b) => {
+    switch (sort.col) {
+      case "lp":         return cmp(a.material.lp, b.material.lp, sort.dir);
+      case "name":       return cmp(a.material.name, b.material.name, sort.dir);
+      case "unit":       return cmp(a.material.unit, b.material.unit, sort.dir);
+      case "qty":        return cmp(a.dept.qty, b.dept.qty, sort.dir);
+      case "unit_price": return cmp(a.material.unit_price, b.material.unit_price, sort.dir);
+      case "value":      return cmp(a.dept.value, b.dept.value, sort.dir);
+    }
+  }), [dept.items, sort]);
 
   const totalValue = dept.items.reduce((sum, i) => sum + (i.dept.value ?? 0), 0);
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
-      >
+      <button onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left">
         <span className="font-semibold text-gray-900 text-sm">{dept.number}. {dept.name}</span>
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-600 font-medium">{fmt(totalValue)} zł</span>
