@@ -72,7 +72,7 @@ export default function ProjectTabs({
 
       {/* Tab content */}
       {activeTab === "materials" && (
-        <MaterialsByDept materials={materials} depts={depts} />
+        <MaterialsByDept materials={materials} depts={depts} chapters={chapters} />
       )}
 
       {activeTab === "calculator" && (

@@ -13,6 +13,8 @@ type Material = {
   unit: string | null; total_qty: number | null; unit_price: number | null; total_value: number | null;
 };
 
+type CostChapter = { id: number; number: string; name: string; order_index: number; total_netto: number | null };
+
 type DeptEntry = { number: string; name: string; items: { material: Material; dept: MaterialDept }[] };
 
 type SortDir = "asc" | "desc";
@@ -73,13 +75,15 @@ function IndeterminateCheckbox({ checked, indeterminate, onChange }: {
 export default function MaterialsByDept({
   materials,
   depts,
+  chapters,
 }: {
   materials: Material[];
   depts: MaterialDept[];
+  chapters?: CostChapter[];
 }) {
   const allMaterials = materials.filter(m => (m.total_qty ?? 0) !== 0 && (m.total_value ?? 0) !== 0);
 
-  // Build dept → materials map (top-level depts only)
+  // Build dept → materials map (top-level depts only) — for accordion sections
   const deptMap = new Map<string, DeptEntry>();
   for (const dept of depts) {
     if (dept.sub_dept_number) continue;
@@ -92,28 +96,97 @@ export default function MaterialsByDept({
   }
   const deptList = Array.from(deptMap.values()).sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
 
+  // Build materialId → dept entries list (for chapter-based filtering)
+  const matDeptEntries = useMemo(() => {
+    const map = new Map<number, { dept_number: string; sub_dept_number: string | null }[]>();
+    for (const d of depts) {
+      if (!map.has(d.material_id)) map.set(d.material_id, []);
+      map.get(d.material_id)!.push({ dept_number: d.dept_number, sub_dept_number: d.sub_dept_number });
+    }
+    return map;
+  }, [depts]);
+
+  // Determine filter mode
+  const useChapterFilter = !!(chapters && chapters.length > 0);
+  const sortedChapters = useMemo(
+    () => chapters ? [...chapters].sort((a, b) => a.order_index - b.order_index) : [],
+    [chapters]
+  );
+  const allChapterNums = useMemo(() => new Set(sortedChapters.map(c => c.number)), [sortedChapters]);
+
+  // Build chapter tree: parents (no dot) → sub-chapters (with dot)
+  const chapterTree = useMemo(() => {
+    const parents = sortedChapters.filter(c => !c.number.includes("."));
+    return parents.map(p => ({
+      ...p,
+      subs: sortedChapters.filter(c => c.number.startsWith(p.number + ".")),
+    }));
+  }, [sortedChapters]);
+
+  const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
+  function toggleChapterExpand(num: string) {
+    setExpandedChapters(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n; });
+  }
+
   // ── Filter state ──
+  const [selectedChapters, setSelectedChapters] = useState<Set<string>>(
+    () => new Set(sortedChapters.map(c => c.number))
+  );
   const allIds = useMemo(() => new Set(allMaterials.map(m => m.id)), [allMaterials]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set(allMaterials.map(m => m.id)));
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(
+    () => new Set(allMaterials.map(m => m.id))
+  );
   const [panelOpen, setPanelOpen] = useState(false);
+  // For material-based mode: expand depts in filter
   const [expandedDepts, setExpandedDepts] = useState<Set<string>>(new Set());
 
-  const isFiltered = selectedIds.size < allIds.size || selectedIds.size === 0;
+  const isChapterFiltered = useChapterFilter && selectedChapters.size < allChapterNums.size;
+  const isMaterialFiltered = !useChapterFilter && (selectedIds.size < allIds.size || selectedIds.size === 0);
+  const isFiltered = isChapterFiltered || isMaterialFiltered;
 
-  const filteredMaterials = isFiltered
-    ? allMaterials.filter(m => selectedIds.has(m.id))
-    : allMaterials;
+  const filteredMaterials = useMemo(() => {
+    if (useChapterFilter) {
+      if (!isChapterFiltered) return allMaterials;
+      return allMaterials.filter(m => {
+        const entries = matDeptEntries.get(m.id) ?? [];
+        return entries.some(e =>
+          selectedChapters.has(e.dept_number) ||
+          (e.sub_dept_number && selectedChapters.has(e.sub_dept_number))
+        );
+      });
+    }
+    return isMaterialFiltered ? allMaterials.filter(m => selectedIds.has(m.id)) : allMaterials;
+  }, [useChapterFilter, isChapterFiltered, isMaterialFiltered, allMaterials, matDeptEntries, selectedChapters, selectedIds]);
 
   const filteredDeptList = useMemo(() =>
     deptList
-      .map(dept => ({ ...dept, items: isFiltered ? dept.items.filter(i => selectedIds.has(i.material.id)) : dept.items }))
+      .map(dept => ({
+        ...dept,
+        items: isFiltered
+          ? dept.items.filter(i => filteredMaterials.some(m => m.id === i.material.id))
+          : dept.items,
+      }))
       .filter(dept => dept.items.length > 0),
-    [deptList, isFiltered, selectedIds] // eslint-disable-line react-hooks/exhaustive-deps
+    [deptList, isFiltered, filteredMaterials]
   );
 
+  // Chapter filter helpers
+  function toggleParentChapter(num: string, subNums: string[]) {
+    const checked = selectedChapters.has(num);
+    setSelectedChapters(prev => {
+      const n = new Set(prev);
+      if (checked) { n.delete(num); subNums.forEach(s => n.delete(s)); }
+      else          { n.add(num);    subNums.forEach(s => n.add(s)); }
+      return n;
+    });
+  }
+  function toggleSubChapter(num: string) {
+    setSelectedChapters(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n; });
+  }
+
+  // Material filter helpers
   function isDeptAllSel(dept: DeptEntry) { return dept.items.every(i => selectedIds.has(i.material.id)); }
   function isDeptAnySel(dept: DeptEntry) { return dept.items.some(i => selectedIds.has(i.material.id)); }
-
   function toggleDept(dept: DeptEntry) {
     const allSel = isDeptAllSel(dept);
     setSelectedIds(prev => {
@@ -122,11 +195,9 @@ export default function MaterialsByDept({
       return next;
     });
   }
-
   function toggleMaterial(id: number) {
     setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
-
   function toggleDeptExpand(num: string) {
     setExpandedDepts(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n; });
   }
@@ -166,13 +237,18 @@ export default function MaterialsByDept({
 
   const grandTotal = filteredMaterials.reduce((sum, m) => sum + (m.total_value ?? 0), 0);
 
+  // Filter panel summary label
+  const filterLabel = useChapterFilter
+    ? `${selectedChapters.size}/${allChapterNums.size} rozdziałów`
+    : `${selectedIds.size}/${allIds.size} pozycji`;
+
   return (
     <div className="lg:flex lg:gap-5 lg:items-start">
 
       {/* ══ Filter panel ══ */}
       <div className="lg:w-60 lg:shrink-0 lg:sticky lg:top-4 mb-4 lg:mb-0">
 
-        {/* Mobile toggle button */}
+        {/* Mobile toggle */}
         <button
           onClick={() => setPanelOpen(!panelOpen)}
           className="lg:hidden w-full flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -181,7 +257,7 @@ export default function MaterialsByDept({
             <span>Filtruj zakres</span>
             {isFiltered && (
               <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                {selectedIds.size}/{allIds.size}
+                {filterLabel}
               </span>
             )}
           </span>
@@ -195,86 +271,158 @@ export default function MaterialsByDept({
             <span className="text-sm font-semibold text-gray-800">Zakres roboczy</span>
             {isFiltered ? (
               <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                {selectedIds.size}/{allIds.size}
+                {filterLabel}
               </span>
             ) : (
-              <span className="text-xs text-gray-400">{allIds.size} poz.</span>
+              <span className="text-xs text-gray-400">
+                {useChapterFilter ? `${allChapterNums.size} rozdz.` : `${allIds.size} poz.`}
+              </span>
             )}
           </div>
 
           {/* Actions */}
           <div className="px-4 py-2 flex items-center gap-3 border-b border-gray-100">
             <button
-              onClick={() => setSelectedIds(new Set(allIds))}
+              onClick={() => useChapterFilter
+                ? setSelectedChapters(new Set(allChapterNums))
+                : setSelectedIds(new Set(allIds))
+              }
               className="text-xs text-blue-600 hover:text-blue-800 font-medium"
             >
               Zaznacz wszystko
             </button>
             <span className="text-gray-200">|</span>
             <button
-              onClick={() => setSelectedIds(new Set())}
+              onClick={() => useChapterFilter
+                ? setSelectedChapters(new Set())
+                : setSelectedIds(new Set())
+              }
               className="text-xs text-gray-500 hover:text-gray-700"
             >
               Odznacz
             </button>
           </div>
 
-          {/* Dept list */}
-          <div className="max-h-[60vh] lg:max-h-[calc(100vh-260px)] overflow-y-auto divide-y divide-gray-50">
-            {deptList.map(dept => {
-              const allSel = isDeptAllSel(dept);
-              const anySel = isDeptAnySel(dept);
-              const expanded = expandedDepts.has(dept.number);
-              return (
-                <div key={dept.number}>
-                  <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50">
-                    <IndeterminateCheckbox
-                      checked={allSel}
-                      indeterminate={anySel}
-                      onChange={() => toggleDept(dept)}
-                    />
-                    <button
-                      onClick={() => toggleDeptExpand(dept.number)}
-                      className="flex-1 flex items-center justify-between text-left min-w-0"
-                    >
-                      <span className="text-xs font-medium text-gray-800 leading-tight truncate pr-1">
-                        {dept.number}. {dept.name}
-                      </span>
-                      <span className="text-gray-400 text-xs shrink-0">{expanded ? "▲" : "▼"}</span>
-                    </button>
-                  </div>
-
-                  {expanded && (
-                    <div className="bg-gray-50/60 pb-1">
-                      {dept.items.map(({ material: m }) => (
-                        <label
-                          key={m.id}
-                          className="flex items-start gap-2 px-4 py-1.5 hover:bg-gray-100 cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(m.id)}
-                            onChange={() => toggleMaterial(m.id)}
-                            className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0"
-                          />
-                          <span className="text-xs text-gray-700 leading-tight">{m.name}</span>
-                        </label>
-                      ))}
+          {/* ── Chapter-based filter (hierarchical) ── */}
+          {useChapterFilter ? (
+            <div className="max-h-[60vh] lg:max-h-[calc(100vh-260px)] overflow-y-auto divide-y divide-gray-50">
+              {chapterTree.map(parent => {
+                const subNums = parent.subs.map(s => s.number);
+                const parentChecked = selectedChapters.has(parent.number);
+                const someSubChecked = subNums.some(s => selectedChapters.has(s));
+                const expanded = expandedChapters.has(parent.number);
+                return (
+                  <div key={parent.number}>
+                    <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50">
+                      <IndeterminateCheckbox
+                        checked={parentChecked}
+                        indeterminate={someSubChecked}
+                        onChange={() => toggleParentChapter(parent.number, subNums)}
+                      />
+                      <button
+                        onClick={() => subNums.length > 0 && toggleChapterExpand(parent.number)}
+                        className="flex-1 flex items-center justify-between text-left min-w-0"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-gray-500">{parent.number}.</span>
+                          {" "}
+                          <span className="text-xs font-medium text-gray-800 leading-tight">{parent.name}</span>
+                          {parent.total_netto !== null && (
+                            <div className="text-xs text-gray-400">{fmt(parent.total_netto)} zł</div>
+                          )}
+                        </div>
+                        {subNums.length > 0 && (
+                          <span className="text-gray-400 text-xs ml-1 shrink-0">{expanded ? "▲" : "▼"}</span>
+                        )}
+                      </button>
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    {expanded && subNums.length > 0 && (
+                      <div className="bg-gray-50/60 divide-y divide-gray-100 pb-1">
+                        {parent.subs.map(sub => (
+                          <label key={sub.number} className="flex items-start gap-2 pl-8 pr-3 py-2 hover:bg-gray-100 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selectedChapters.has(sub.number)}
+                              onChange={() => toggleSubChapter(sub.number)}
+                              className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <span className="text-xs text-gray-500">{sub.number}.</span>
+                              {" "}
+                              <span className="text-xs text-gray-700 leading-tight">{sub.name}</span>
+                              {sub.total_netto !== null && (
+                                <div className="text-xs text-gray-400">{fmt(sub.total_netto)} zł</div>
+                              )}
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* ── Material/dept-based filter (fallback) ── */
+            <div className="max-h-[60vh] lg:max-h-[calc(100vh-260px)] overflow-y-auto divide-y divide-gray-50">
+              {deptList.length === 0 ? (
+                <p className="px-4 py-3 text-xs text-gray-400">Brak przypisanych działów.</p>
+              ) : (
+                deptList.map(dept => {
+                  const allSel = isDeptAllSel(dept);
+                  const anySel = isDeptAnySel(dept);
+                  const expanded = expandedDepts.has(dept.number);
+                  return (
+                    <div key={dept.number}>
+                      <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50">
+                        <IndeterminateCheckbox
+                          checked={allSel}
+                          indeterminate={anySel}
+                          onChange={() => toggleDept(dept)}
+                        />
+                        <button
+                          onClick={() => toggleDeptExpand(dept.number)}
+                          className="flex-1 flex items-center justify-between text-left min-w-0"
+                        >
+                          <span className="text-xs font-medium text-gray-800 leading-tight truncate pr-1">
+                            {dept.number}. {dept.name}
+                          </span>
+                          <span className="text-gray-400 text-xs shrink-0">{expanded ? "▲" : "▼"}</span>
+                        </button>
+                      </div>
+                      {expanded && (
+                        <div className="bg-gray-50/60 pb-1">
+                          {dept.items.map(({ material: m }) => (
+                            <label key={m.id} className="flex items-start gap-2 px-4 py-1.5 hover:bg-gray-100 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(m.id)}
+                                onChange={() => toggleMaterial(m.id)}
+                                className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0"
+                              />
+                              <span className="text-xs text-gray-700 leading-tight">{m.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
 
-          {/* Active filter summary */}
+          {/* Active filter footer */}
           {isFiltered && (
             <div className="px-4 py-2.5 border-t border-gray-100 bg-blue-50/50">
               <p className="text-xs text-blue-700">
-                Aktywny filtr — wartość: <span className="font-semibold">{fmt(grandTotal)} zł</span>
+                Wartość filtra: <span className="font-semibold">{fmt(grandTotal)} zł</span>
               </p>
               <button
-                onClick={() => setSelectedIds(new Set(allIds))}
+                onClick={() => useChapterFilter
+                  ? setSelectedChapters(new Set(allChapterNums))
+                  : setSelectedIds(new Set(allIds))
+                }
                 className="text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800 mt-0.5"
               >
                 Pokaż wszystkie
@@ -315,7 +463,6 @@ export default function MaterialsByDept({
               <span className="text-blue-400 text-xs">{openSet.has("summary") ? "▲" : "▼"}</span>
             </div>
           </button>
-
           {openSet.has("summary") && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -362,8 +509,8 @@ export default function MaterialsByDept({
           />
         ))}
 
-        {isFiltered && filteredDeptList.length === 0 && filteredMaterials.length === 0 && (
-          <p className="text-sm text-gray-400 py-4 text-center">Brak zaznaczonych pozycji.</p>
+        {isFiltered && filteredMaterials.length === 0 && (
+          <p className="text-sm text-gray-400 py-4 text-center">Brak materiałów dla wybranego zakresu.</p>
         )}
       </div>
     </div>
@@ -413,7 +560,6 @@ function DeptSection({
           <span className="text-gray-400 text-xs">{isOpen ? "▲" : "▼"}</span>
         </div>
       </button>
-
       {isOpen && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

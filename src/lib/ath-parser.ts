@@ -241,15 +241,26 @@ export function parseAth(buffer: Buffer): {
   const estimate: ParsedEstimate = { meta, chapters, items: costItems };
 
   // ── Materials ([RMS ZEST N] with ty=M) ───────────────────────────────────
+  // RMS ZEST sections appear within ELEMENT blocks — track current chapter
+  // to build dept associations. Deduplicate by index_code (same material may
+  // appear in multiple chapters).
+  const materialMap = new Map<string, ParsedMaterial>();
   const materials: ParsedMaterial[] = [];
   let matLp = 1;
+  let currentChapterNum: string | null = null;
+  let currentChapterName: string | null = null;
 
   for (const s of sections) {
+    if (/^ELEMENT\s+[12]$/.test(s.name)) {
+      currentChapterNum = firstToken(s.fields["nu"] ?? "") || null;
+      currentChapterName = firstToken(s.fields["na"] ?? "") || null;
+      continue;
+    }
+
     if (!s.name.startsWith("RMS ZEST ")) continue;
     if (firstToken(s.fields["ty"] ?? "") !== "M") continue;
 
     const name = firstToken(s.fields["na"] ?? "");
-    // Skip placeholder entries (empty name or generic "materiały pomocnicze" with code 0000000)
     const code = firstToken(s.fields["id"] ?? "");
     if (!name || code === "0000000") continue;
 
@@ -259,17 +270,38 @@ export function parseAth(buffer: Buffer): {
       qty !== null && unitPrice !== null
         ? Math.round(qty * unitPrice * 100) / 100
         : null;
+    const unit = firstToken(s.fields["jm"] ?? "") || null;
 
-    materials.push({
-      lp: matLp++,
-      index_code: code,
-      name,
-      unit: firstToken(s.fields["jm"] ?? "") || null,
-      total_qty: qty,
+    const deptEntry: import("./pdf-parser").ParsedDept | null = currentChapterNum ? {
+      dept_number: currentChapterNum,
+      dept_name: currentChapterName ?? currentChapterNum,
+      sub_dept_number: null,
+      sub_dept_name: null,
+      unit,
+      qty,
       unit_price: unitPrice,
-      total_value: totalValue,
-      depts: [], // ATH doesn't group materials by dept (chapter)
-    });
+      value: totalValue,
+    } : null;
+
+    const existing = materialMap.get(code);
+    if (existing) {
+      existing.total_qty = Math.round(((existing.total_qty ?? 0) + (qty ?? 0)) * 10000) / 10000;
+      existing.total_value = Math.round(((existing.total_value ?? 0) + (totalValue ?? 0)) * 100) / 100;
+      if (deptEntry) existing.depts.push(deptEntry);
+    } else {
+      const mat: ParsedMaterial = {
+        lp: matLp++,
+        index_code: code,
+        name,
+        unit,
+        total_qty: qty,
+        unit_price: unitPrice,
+        total_value: totalValue,
+        depts: deptEntry ? [deptEntry] : [],
+      };
+      materialMap.set(code, mat);
+      materials.push(mat);
+    }
   }
 
   return { estimate, materials };
