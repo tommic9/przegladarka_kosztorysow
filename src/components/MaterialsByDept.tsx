@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 
 type MaterialDept = {
   id: number; material_id: number; dept_number: string; dept_name: string;
@@ -12,6 +12,8 @@ type Material = {
   id: number; lp: number | null; index_code: string | null; name: string;
   unit: string | null; total_qty: number | null; unit_price: number | null; total_value: number | null;
 };
+
+type DeptEntry = { number: string; name: string; items: { material: Material; dept: MaterialDept }[] };
 
 type SortDir = "asc" | "desc";
 type SummaryCol = "lp" | "name" | "unit" | "total_qty" | "unit_price" | "total_value";
@@ -50,6 +52,24 @@ function cmp<T>(a: T, b: T, dir: SortDir): number {
   return dir === "asc" ? v : -v;
 }
 
+function IndeterminateCheckbox({ checked, indeterminate, onChange }: {
+  checked: boolean; indeterminate: boolean; onChange: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = !checked && indeterminate;
+  }, [checked, indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      onChange={onChange}
+      className="h-4 w-4 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0"
+    />
+  );
+}
+
 export default function MaterialsByDept({
   materials,
   depts,
@@ -57,33 +77,69 @@ export default function MaterialsByDept({
   materials: Material[];
   depts: MaterialDept[];
 }) {
-  const visibleMaterials = materials.filter(m => (m.total_qty ?? 0) !== 0 && (m.total_value ?? 0) !== 0);
+  const allMaterials = materials.filter(m => (m.total_qty ?? 0) !== 0 && (m.total_value ?? 0) !== 0);
 
   // Build dept → materials map (top-level depts only)
-  const deptMap = new Map<string, { number: string; name: string; items: { material: Material; dept: MaterialDept }[] }>();
-
+  const deptMap = new Map<string, DeptEntry>();
   for (const dept of depts) {
     if (dept.sub_dept_number) continue;
     const key = dept.dept_number;
     if (!deptMap.has(key)) {
       deptMap.set(key, { number: dept.dept_number, name: dept.dept_name, items: [] });
     }
-    const mat = visibleMaterials.find((m) => m.id === dept.material_id);
+    const mat = allMaterials.find((m) => m.id === dept.material_id);
     if (mat) deptMap.get(key)!.items.push({ material: mat, dept });
   }
-
   const deptList = Array.from(deptMap.values()).sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
 
-  // Open state
+  // ── Filter state ──
+  const allIds = useMemo(() => new Set(allMaterials.map(m => m.id)), [allMaterials]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set(allMaterials.map(m => m.id)));
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [expandedDepts, setExpandedDepts] = useState<Set<string>>(new Set());
+
+  const isFiltered = selectedIds.size < allIds.size || selectedIds.size === 0;
+
+  const filteredMaterials = isFiltered
+    ? allMaterials.filter(m => selectedIds.has(m.id))
+    : allMaterials;
+
+  const filteredDeptList = useMemo(() =>
+    deptList
+      .map(dept => ({ ...dept, items: isFiltered ? dept.items.filter(i => selectedIds.has(i.material.id)) : dept.items }))
+      .filter(dept => dept.items.length > 0),
+    [deptList, isFiltered, selectedIds] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  function isDeptAllSel(dept: DeptEntry) { return dept.items.every(i => selectedIds.has(i.material.id)); }
+  function isDeptAnySel(dept: DeptEntry) { return dept.items.some(i => selectedIds.has(i.material.id)); }
+
+  function toggleDept(dept: DeptEntry) {
+    const allSel = isDeptAllSel(dept);
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      for (const { material: m } of dept.items) allSel ? next.delete(m.id) : next.add(m.id);
+      return next;
+    });
+  }
+
+  function toggleMaterial(id: number) {
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
+  function toggleDeptExpand(num: string) {
+    setExpandedDepts(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n; });
+  }
+
+  // ── Accordion open state ──
   const allKeys = ["summary", ...deptList.map((d) => d.number)];
   const [openSet, setOpenSet] = useState<Set<string>>(() => new Set(allKeys));
   const toggle = (key: string) =>
     setOpenSet((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   const allOpen = openSet.has("summary") && deptList.every((d) => openSet.has(d.number));
 
-  // Summary sort state
+  // ── Summary sort state ──
   const [sumSort, setSumSort] = useState<{ col: SummaryCol; dir: SortDir }>({ col: "lp", dir: "asc" });
-
   function toggleSumSort(col: SummaryCol) {
     setSumSort((prev) => prev.col === col
       ? { col, dir: prev.dir === "asc" ? "desc" : "asc" }
@@ -92,96 +148,224 @@ export default function MaterialsByDept({
   }
 
   const sortedMaterials = useMemo(() => {
-    return [...visibleMaterials].sort((a, b) => {
+    return [...filteredMaterials].sort((a, b) => {
       switch (sumSort.col) {
-        case "lp":         return cmp(a.lp, b.lp, sumSort.dir);
-        case "name":       return cmp(a.name, b.name, sumSort.dir);
-        case "unit":       return cmp(a.unit, b.unit, sumSort.dir);
-        case "total_qty":  return cmp(a.total_qty, b.total_qty, sumSort.dir);
-        case "unit_price": return cmp(a.unit_price, b.unit_price, sumSort.dir);
-        case "total_value":return cmp(a.total_value, b.total_value, sumSort.dir);
+        case "lp":          return cmp(a.lp, b.lp, sumSort.dir);
+        case "name":        return cmp(a.name, b.name, sumSort.dir);
+        case "unit":        return cmp(a.unit, b.unit, sumSort.dir);
+        case "total_qty":   return cmp(a.total_qty, b.total_qty, sumSort.dir);
+        case "unit_price":  return cmp(a.unit_price, b.unit_price, sumSort.dir);
+        case "total_value": return cmp(a.total_value, b.total_value, sumSort.dir);
       }
     });
-  }, [visibleMaterials, sumSort]);
+  }, [filteredMaterials, sumSort]);
 
-  if (deptList.length === 0 && visibleMaterials.length === 0) {
+  if (deptList.length === 0 && allMaterials.length === 0) {
     return <p className="text-sm text-gray-400 py-4">Brak danych o materiałach.</p>;
   }
 
-  const grandTotal = materials.reduce((sum, m) => sum + (m.total_value ?? 0), 0);
+  const grandTotal = filteredMaterials.reduce((sum, m) => sum + (m.total_value ?? 0), 0);
 
   return (
-    <div className="space-y-4">
+    <div className="lg:flex lg:gap-5 lg:items-start">
 
-      {/* ── Toolbar ── */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">{materials.length} pozycji materiałowych</p>
+      {/* ══ Filter panel ══ */}
+      <div className="lg:w-60 lg:shrink-0 lg:sticky lg:top-4 mb-4 lg:mb-0">
+
+        {/* Mobile toggle button */}
         <button
-          onClick={allOpen ? () => setOpenSet(new Set()) : () => setOpenSet(new Set(allKeys))}
-          className="btn btn-secondary btn-sm"
+          onClick={() => setPanelOpen(!panelOpen)}
+          className="lg:hidden w-full flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
         >
-          {allOpen ? "Zwiń wszystko" : "Rozwiń wszystko"}
+          <span className="flex items-center gap-2">
+            <span>Filtruj zakres</span>
+            {isFiltered && (
+              <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+                {selectedIds.size}/{allIds.size}
+              </span>
+            )}
+          </span>
+          <span className="text-gray-400 text-xs">{panelOpen ? "▲" : "▼"}</span>
         </button>
+
+        {/* Panel body */}
+        <div className={`${panelOpen ? "block mt-2" : "hidden"} lg:block bg-white border border-gray-200 rounded-xl overflow-hidden`}>
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <span className="text-sm font-semibold text-gray-800">Zakres roboczy</span>
+            {isFiltered ? (
+              <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+                {selectedIds.size}/{allIds.size}
+              </span>
+            ) : (
+              <span className="text-xs text-gray-400">{allIds.size} poz.</span>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="px-4 py-2 flex items-center gap-3 border-b border-gray-100">
+            <button
+              onClick={() => setSelectedIds(new Set(allIds))}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+            >
+              Zaznacz wszystko
+            </button>
+            <span className="text-gray-200">|</span>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              Odznacz
+            </button>
+          </div>
+
+          {/* Dept list */}
+          <div className="max-h-[60vh] lg:max-h-[calc(100vh-260px)] overflow-y-auto divide-y divide-gray-50">
+            {deptList.map(dept => {
+              const allSel = isDeptAllSel(dept);
+              const anySel = isDeptAnySel(dept);
+              const expanded = expandedDepts.has(dept.number);
+              return (
+                <div key={dept.number}>
+                  <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50">
+                    <IndeterminateCheckbox
+                      checked={allSel}
+                      indeterminate={anySel}
+                      onChange={() => toggleDept(dept)}
+                    />
+                    <button
+                      onClick={() => toggleDeptExpand(dept.number)}
+                      className="flex-1 flex items-center justify-between text-left min-w-0"
+                    >
+                      <span className="text-xs font-medium text-gray-800 leading-tight truncate pr-1">
+                        {dept.number}. {dept.name}
+                      </span>
+                      <span className="text-gray-400 text-xs shrink-0">{expanded ? "▲" : "▼"}</span>
+                    </button>
+                  </div>
+
+                  {expanded && (
+                    <div className="bg-gray-50/60 pb-1">
+                      {dept.items.map(({ material: m }) => (
+                        <label
+                          key={m.id}
+                          className="flex items-start gap-2 px-4 py-1.5 hover:bg-gray-100 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(m.id)}
+                            onChange={() => toggleMaterial(m.id)}
+                            className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0"
+                          />
+                          <span className="text-xs text-gray-700 leading-tight">{m.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Active filter summary */}
+          {isFiltered && (
+            <div className="px-4 py-2.5 border-t border-gray-100 bg-blue-50/50">
+              <p className="text-xs text-blue-700">
+                Aktywny filtr — wartość: <span className="font-semibold">{fmt(grandTotal)} zł</span>
+              </p>
+              <button
+                onClick={() => setSelectedIds(new Set(allIds))}
+                className="text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800 mt-0.5"
+              >
+                Pokaż wszystkie
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* ── Zestawienie całościowe ── */}
-      <div className="border border-blue-100 rounded-xl overflow-hidden">
-        <button
-          onClick={() => toggle("summary")}
-          className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 hover:bg-blue-100 transition-colors text-left"
-        >
-          <span className="font-semibold text-blue-900 text-sm">Zestawienie całościowe materiałów</span>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-blue-700 font-medium">{fmt(grandTotal)} zł</span>
-            <span className="text-blue-400 text-xs">{openSet.has("summary") ? "▲" : "▼"}</span>
-          </div>
-        </button>
+      {/* ══ Materials content ══ */}
+      <div className="flex-1 min-w-0 space-y-4">
 
-        {openSet.has("summary") && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-white">
-                  <SortTh label="Lp."         col="lp"          active={sumSort.col === "lp"}          dir={sumSort.dir} onClick={() => toggleSumSort("lp")} />
-                  <SortTh label="Nazwa materiału" col="name"     active={sumSort.col === "name"}        dir={sumSort.dir} onClick={() => toggleSumSort("name")} />
-                  <SortTh label="j.m."         col="unit"        active={sumSort.col === "unit"}        dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit")} />
-                  <SortTh label="Ilość łączna" col="total_qty"   active={sumSort.col === "total_qty"}   dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_qty")} />
-                  <SortTh label="Cena jedn. netto" col="unit_price"  active={sumSort.col === "unit_price"}  dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit_price")} />
-                  <SortTh label="Wartość netto"    col="total_value" active={sumSort.col === "total_value"} dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_value")} />
-                </tr>
-              </thead>
-              <tbody>
-                {sortedMaterials.map((m, idx) => (
-                  <tr key={m.id} className={`border-b border-gray-50 ${idx % 2 === 1 ? "bg-gray-50/50" : ""}`}>
-                    <td className="px-4 py-2 text-gray-400">{m.lp}</td>
-                    <td className="px-4 py-2 text-gray-900">{m.name}</td>
-                    <td className="px-4 py-2 text-right text-gray-600">{m.unit || "—"}</td>
-                    <td className="px-4 py-2 text-right text-gray-900 font-medium">{fmt(m.total_qty, 4)}</td>
-                    <td className="px-4 py-2 text-right text-gray-600">{fmt(m.unit_price)}</td>
-                    <td className="px-4 py-2 text-right font-medium text-gray-900">{fmt(m.total_value)} zł</td>
+        {/* Toolbar */}
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-500">
+            {isFiltered
+              ? <>{filteredMaterials.length} <span className="text-blue-600 font-medium">z {allMaterials.length}</span> pozycji</>
+              : <>{allMaterials.length} pozycji materiałowych</>
+            }
+          </p>
+          <button
+            onClick={allOpen ? () => setOpenSet(new Set()) : () => setOpenSet(new Set(allKeys))}
+            className="btn btn-secondary btn-sm"
+          >
+            {allOpen ? "Zwiń wszystko" : "Rozwiń wszystko"}
+          </button>
+        </div>
+
+        {/* Zestawienie całościowe */}
+        <div className="border border-blue-100 rounded-xl overflow-hidden">
+          <button
+            onClick={() => toggle("summary")}
+            className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 hover:bg-blue-100 transition-colors text-left"
+          >
+            <span className="font-semibold text-blue-900 text-sm">Zestawienie całościowe materiałów</span>
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-blue-700 font-medium">{fmt(grandTotal)} zł</span>
+              <span className="text-blue-400 text-xs">{openSet.has("summary") ? "▲" : "▼"}</span>
+            </div>
+          </button>
+
+          {openSet.has("summary") && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-white">
+                    <SortTh label="Lp."              col="lp"          active={sumSort.col === "lp"}          dir={sumSort.dir} onClick={() => toggleSumSort("lp")} />
+                    <SortTh label="Nazwa materiału"  col="name"         active={sumSort.col === "name"}        dir={sumSort.dir} onClick={() => toggleSumSort("name")} />
+                    <SortTh label="j.m."             col="unit"         active={sumSort.col === "unit"}        dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit")} />
+                    <SortTh label="Ilość łączna"     col="total_qty"    active={sumSort.col === "total_qty"}   dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_qty")} />
+                    <SortTh label="Cena jedn. netto" col="unit_price"   active={sumSort.col === "unit_price"}  dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit_price")} />
+                    <SortTh label="Wartość netto"    col="total_value"  active={sumSort.col === "total_value"} dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_value")} />
                   </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-gray-200 bg-blue-50">
-                  <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Razem netto:</td>
-                  <td className="px-4 py-2 text-right font-bold text-blue-900">{fmt(grandTotal)} zł</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {sortedMaterials.map((m, idx) => (
+                    <tr key={m.id} className={`border-b border-gray-50 ${idx % 2 === 1 ? "bg-gray-50/50" : ""}`}>
+                      <td className="px-4 py-2 text-gray-400">{m.lp}</td>
+                      <td className="px-4 py-2 text-gray-900">{m.name}</td>
+                      <td className="px-4 py-2 text-right text-gray-600">{m.unit || "—"}</td>
+                      <td className="px-4 py-2 text-right text-gray-900 font-medium">{fmt(m.total_qty, 4)}</td>
+                      <td className="px-4 py-2 text-right text-gray-600">{fmt(m.unit_price)}</td>
+                      <td className="px-4 py-2 text-right font-medium text-gray-900">{fmt(m.total_value)} zł</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-gray-200 bg-blue-50">
+                    <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Razem netto:</td>
+                    <td className="px-4 py-2 text-right font-bold text-blue-900">{fmt(grandTotal)} zł</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Działy */}
+        {filteredDeptList.map((dept) => (
+          <DeptSection
+            key={dept.number}
+            dept={dept}
+            isOpen={openSet.has(dept.number)}
+            onToggle={() => toggle(dept.number)}
+          />
+        ))}
+
+        {isFiltered && filteredDeptList.length === 0 && filteredMaterials.length === 0 && (
+          <p className="text-sm text-gray-400 py-4 text-center">Brak zaznaczonych pozycji.</p>
         )}
       </div>
-
-      {/* ── Działy ── */}
-      {deptList.map((dept) => (
-        <DeptSection
-          key={dept.number}
-          dept={dept}
-          isOpen={openSet.has(dept.number)}
-          onToggle={() => toggle(dept.number)}
-        />
-      ))}
     </div>
   );
 }
@@ -189,7 +373,7 @@ export default function MaterialsByDept({
 function DeptSection({
   dept, isOpen, onToggle,
 }: {
-  dept: { number: string; name: string; items: { material: Material; dept: MaterialDept }[] };
+  dept: DeptEntry;
   isOpen: boolean;
   onToggle: () => void;
 }) {
@@ -235,12 +419,12 @@ function DeptSection({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-white">
-                <SortTh label="Lp."       col="lp"         active={sort.col === "lp"}         dir={sort.dir} onClick={() => toggleSort("lp")} />
-                <SortTh label="Nazwa materiału" col="name" active={sort.col === "name"}        dir={sort.dir} onClick={() => toggleSort("name")} />
-                <SortTh label="j.m."      col="unit"       active={sort.col === "unit"}        dir={sort.dir} align="right" onClick={() => toggleSort("unit")} />
-                <SortTh label="Ilość"     col="qty"        active={sort.col === "qty"}         dir={sort.dir} align="right" onClick={() => toggleSort("qty")} />
-                <SortTh label="Cena jedn. netto" col="unit_price" active={sort.col === "unit_price"} dir={sort.dir} align="right" onClick={() => toggleSort("unit_price")} />
-                <SortTh label="Wartość netto"   col="value"      active={sort.col === "value"}       dir={sort.dir} align="right" onClick={() => toggleSort("value")} />
+                <SortTh label="Lp."              col="lp"         active={sort.col === "lp"}         dir={sort.dir} onClick={() => toggleSort("lp")} />
+                <SortTh label="Nazwa materiału"  col="name"       active={sort.col === "name"}        dir={sort.dir} onClick={() => toggleSort("name")} />
+                <SortTh label="j.m."             col="unit"       active={sort.col === "unit"}        dir={sort.dir} align="right" onClick={() => toggleSort("unit")} />
+                <SortTh label="Ilość"            col="qty"        active={sort.col === "qty"}         dir={sort.dir} align="right" onClick={() => toggleSort("qty")} />
+                <SortTh label="Cena jedn. netto" col="unit_price" active={sort.col === "unit_price"}  dir={sort.dir} align="right" onClick={() => toggleSort("unit_price")} />
+                <SortTh label="Wartość netto"    col="value"      active={sort.col === "value"}       dir={sort.dir} align="right" onClick={() => toggleSort("value")} />
               </tr>
             </thead>
             <tbody>
