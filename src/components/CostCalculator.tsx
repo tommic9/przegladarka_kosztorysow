@@ -162,6 +162,28 @@ export default function CostCalculator({
         </div>
       </div>
 
+      {/* Sticky summary bar — hidden on print */}
+      <div className="no-print sticky top-0 z-10 bg-white/95 backdrop-blur border border-gray-200 rounded-xl px-4 py-3 mb-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+        <div className="flex flex-wrap gap-4 text-sm">
+          <span className="text-gray-500">
+            Netto: <span className="font-semibold text-gray-900 tabular-nums">{fmt(selectedNetto)} zł</span>
+          </span>
+          <span className="text-gray-400">|</span>
+          <span className="text-gray-500">
+            VAT {vatRate}%: <span className="font-medium text-gray-700 tabular-nums">{fmt(selectedVat)} zł</span>
+          </span>
+          <span className="text-gray-400">|</span>
+          <span className="text-gray-500">
+            Brutto: <span className="font-bold text-gray-900 tabular-nums">{fmt(selectedBrutto)} zł</span>
+          </span>
+        </div>
+        {disabled.size > 0 && (
+          <span className="text-xs text-gray-400">
+            Wyłączono {disabled.size} poz. (−{fmt(totalNetto - selectedNetto)} zł)
+          </span>
+        )}
+      </div>
+
       {/* Chapters */}
       <div className="space-y-6">
         {chapters.map((chapter) => {

@@ -35,7 +35,7 @@ export default function ProjectTabs({
   const hasCalculator = items.length > 0;
   const hasDiff = versions.length >= 2;
 
-  const defaultTab = hasMaterials ? "materials" : hasCalculator ? "calculator" : "materials";
+  const defaultTab = hasCalculator ? "calculator" : hasMaterials ? "materials" : "materials";
   const [activeTab, setActiveTab] = useState<string>(defaultTab);
 
   return (

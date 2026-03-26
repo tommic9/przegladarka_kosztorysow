@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 
 type MaterialDept = {
   id: number; material_id: number; dept_number: string; dept_name: string;
@@ -13,9 +13,17 @@ type Material = {
   unit: string | null; total_qty: number | null; unit_price: number | null; total_value: number | null;
 };
 
+type DeptEntry = { number: string; name: string; items: { material: Material; dept: MaterialDept }[] };
+
 type SortDir = "asc" | "desc";
 type SummaryCol = "lp" | "name" | "unit" | "total_qty" | "unit_price" | "total_value";
 type DeptCol = "lp" | "name" | "unit" | "qty" | "unit_price" | "value";
+
+// ── Filter tree node ──────────────────────────────────────────────────────────
+type FilterDept = {
+  number: string; name: string;
+  subs: { number: string; name: string }[];
+};
 
 function fmt(n: number | null | undefined, decimals = 2): string {
   if (n === null || n === undefined) return "—";
@@ -25,18 +33,14 @@ function fmt(n: number | null | undefined, decimals = 2): string {
   }).format(n);
 }
 
-function SortTh({
-  label, col, active, dir, align = "left", onClick,
-}: {
+function SortTh({ label, col, active, dir, align = "left", onClick }: {
   label: string; col: string; active: boolean; dir: SortDir;
   align?: "left" | "right"; onClick: () => void;
 }) {
   return (
-    <th
-      onClick={onClick}
+    <th onClick={onClick}
       className={`px-4 py-2 text-xs font-medium cursor-pointer select-none whitespace-nowrap
-        text-${align} ${active ? "text-blue-600" : "text-gray-500 hover:text-gray-800"}`}
-    >
+        text-${align} ${active ? "text-blue-600" : "text-gray-500 hover:text-gray-800"}`}>
       {label}
       <span className="ml-1 opacity-60">{active ? (dir === "asc" ? "▲" : "▼") : "⇅"}</span>
     </th>
@@ -50,197 +54,404 @@ function cmp<T>(a: T, b: T, dir: SortDir): number {
   return dir === "asc" ? v : -v;
 }
 
+function IndeterminateCheckbox({ checked, indeterminate, onChange }: {
+  checked: boolean; indeterminate: boolean; onChange: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = !checked && indeterminate;
+  }, [checked, indeterminate]);
+  return (
+    <input ref={ref} type="checkbox" checked={checked} onChange={onChange}
+      className="h-4 w-4 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0" />
+  );
+}
+
 export default function MaterialsByDept({
-  materials,
-  depts,
+  materials, depts,
 }: {
   materials: Material[];
   depts: MaterialDept[];
 }) {
-  const visibleMaterials = materials.filter(m => (m.total_qty ?? 0) !== 0 && (m.total_value ?? 0) !== 0);
+  const allMaterials = useMemo(
+    () => materials.filter(m => (m.total_qty ?? 0) !== 0 && (m.total_value ?? 0) !== 0),
+    [materials]
+  );
 
-  // Build dept → materials map (top-level depts only)
-  const deptMap = new Map<string, { number: string; name: string; items: { material: Material; dept: MaterialDept }[] }>();
-
-  for (const dept of depts) {
-    if (dept.sub_dept_number) continue;
-    const key = dept.dept_number;
-    if (!deptMap.has(key)) {
-      deptMap.set(key, { number: dept.dept_number, name: dept.dept_name, items: [] });
+  // ── Build accordion dept list ────────────────────────────────────────────────
+  const deptMap = useMemo(() => {
+    const map = new Map<string, DeptEntry>();
+    for (const dept of depts) {
+      if (dept.sub_dept_number) continue;
+      const key = dept.dept_number;
+      if (!map.has(key)) map.set(key, { number: dept.dept_number, name: dept.dept_name, items: [] });
+      const mat = allMaterials.find(m => m.id === dept.material_id);
+      if (mat) map.get(key)!.items.push({ material: mat, dept });
     }
-    const mat = visibleMaterials.find((m) => m.id === dept.material_id);
-    if (mat) deptMap.get(key)!.items.push({ material: mat, dept });
-  }
+    return map;
+  }, [depts, allMaterials]);
 
-  const deptList = Array.from(deptMap.values()).sort((a, b) => parseFloat(a.number) - parseFloat(b.number));
+  const deptList = useMemo(
+    () => Array.from(deptMap.values()).sort((a, b) => parseFloat(a.number) - parseFloat(b.number)),
+    [deptMap]
+  );
 
-  // Open state
-  const allKeys = ["summary", ...deptList.map((d) => d.number)];
-  const [openSet, setOpenSet] = useState<Set<string>>(() => new Set(allKeys));
-  const toggle = (key: string) =>
-    setOpenSet((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
-  const allOpen = openSet.has("summary") && deptList.every((d) => openSet.has(d.number));
+  // ── Build filter tree (dept → sub-depts) ─────────────────────────────────────
+  const filterTree = useMemo((): FilterDept[] => {
+    const parentMap = new Map<string, FilterDept>();
+    for (const d of depts) {
+      if (!parentMap.has(d.dept_number)) {
+        parentMap.set(d.dept_number, { number: d.dept_number, name: d.dept_name, subs: [] });
+      }
+      if (d.sub_dept_number) {
+        const parent = parentMap.get(d.dept_number)!;
+        if (!parent.subs.some(s => s.number === d.sub_dept_number)) {
+          parent.subs.push({ number: d.sub_dept_number, name: d.sub_dept_name ?? d.sub_dept_number });
+        }
+      }
+    }
+    return Array.from(parentMap.values())
+      .sort((a, b) => parseFloat(a.number) - parseFloat(b.number))
+      .map(p => ({ ...p, subs: [...p.subs].sort((a, b) => parseFloat(a.number) - parseFloat(b.number)) }));
+  }, [depts]);
 
-  // Summary sort state
-  const [sumSort, setSumSort] = useState<{ col: SummaryCol; dir: SortDir }>({ col: "lp", dir: "asc" });
+  // All selectable keys = dept_numbers + sub_dept_numbers
+  const allFilterKeys = useMemo(() => {
+    const keys = new Set<string>();
+    filterTree.forEach(p => {
+      keys.add(p.number);
+      p.subs.forEach(s => keys.add(s.number));
+    });
+    return keys;
+  }, [filterTree]);
 
-  function toggleSumSort(col: SummaryCol) {
-    setSumSort((prev) => prev.col === col
-      ? { col, dir: prev.dir === "asc" ? "desc" : "asc" }
-      : { col, dir: "asc" }
+  // ── Selection state ──────────────────────────────────────────────────────────
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set(allFilterKeys));
+  const [expandedFilter, setExpandedFilter] = useState<Set<string>>(new Set());
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  const isFiltered = selectedKeys.size < allFilterKeys.size;
+
+  // materialId → [{dept_number, sub_dept_number}]
+  const matDeptIndex = useMemo(() => {
+    const map = new Map<number, { dn: string; sn: string | null }[]>();
+    for (const d of depts) {
+      if (!map.has(d.material_id)) map.set(d.material_id, []);
+      map.get(d.material_id)!.push({ dn: d.dept_number, sn: d.sub_dept_number });
+    }
+    return map;
+  }, [depts]);
+
+  function materialVisible(id: number): boolean {
+    const entries = matDeptIndex.get(id);
+    if (!entries || entries.length === 0) return true; // no dept data → always show
+    return entries.some(e =>
+      selectedKeys.has(e.dn) ||                          // parent selected
+      (e.sn !== null && selectedKeys.has(e.sn))          // or specific sub selected
     );
   }
 
-  const sortedMaterials = useMemo(() => {
-    return [...visibleMaterials].sort((a, b) => {
-      switch (sumSort.col) {
-        case "lp":         return cmp(a.lp, b.lp, sumSort.dir);
-        case "name":       return cmp(a.name, b.name, sumSort.dir);
-        case "unit":       return cmp(a.unit, b.unit, sumSort.dir);
-        case "total_qty":  return cmp(a.total_qty, b.total_qty, sumSort.dir);
-        case "unit_price": return cmp(a.unit_price, b.unit_price, sumSort.dir);
-        case "total_value":return cmp(a.total_value, b.total_value, sumSort.dir);
-      }
-    });
-  }, [visibleMaterials, sumSort]);
+  const filteredMaterials = useMemo(
+    () => isFiltered ? allMaterials.filter(m => materialVisible(m.id)) : allMaterials,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isFiltered, allMaterials, selectedKeys, matDeptIndex]
+  );
 
-  if (deptList.length === 0 && visibleMaterials.length === 0) {
+  const filteredDeptList = useMemo(
+    () => deptList
+      .map(d => ({ ...d, items: isFiltered ? d.items.filter(i => materialVisible(i.material.id)) : d.items }))
+      .filter(d => d.items.length > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deptList, isFiltered, selectedKeys, matDeptIndex]
+  );
+
+  // ── Filter helpers ───────────────────────────────────────────────────────────
+  function allSubKeys(p: FilterDept) { return p.subs.map(s => s.number); }
+
+  function toggleParent(p: FilterDept) {
+    const subs = allSubKeys(p);
+    const checked = selectedKeys.has(p.number);
+    setSelectedKeys(prev => {
+      const n = new Set(prev);
+      if (checked) { n.delete(p.number); subs.forEach(s => n.delete(s)); }
+      else          { n.add(p.number);    subs.forEach(s => n.add(s)); }
+      return n;
+    });
+  }
+
+  function toggleSub(subNum: string) {
+    setSelectedKeys(prev => { const n = new Set(prev); n.has(subNum) ? n.delete(subNum) : n.add(subNum); return n; });
+  }
+
+  function isParentChecked(p: FilterDept) { return selectedKeys.has(p.number); }
+  function isParentIndeterminate(p: FilterDept) {
+    if (selectedKeys.has(p.number)) return false;
+    return allSubKeys(p).some(s => selectedKeys.has(s));
+  }
+
+  function toggleFilterExpand(num: string) {
+    setExpandedFilter(prev => { const n = new Set(prev); n.has(num) ? n.delete(num) : n.add(num); return n; });
+  }
+
+  // ── Accordion (materials view) ───────────────────────────────────────────────
+  const allKeys = ["summary", ...deptList.map(d => d.number)];
+  const [openSet, setOpenSet] = useState<Set<string>>(() => new Set(allKeys));
+  const toggle = (key: string) =>
+    setOpenSet(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const allOpen = openSet.has("summary") && deptList.every(d => openSet.has(d.number));
+
+  // ── Summary sort ─────────────────────────────────────────────────────────────
+  const [sumSort, setSumSort] = useState<{ col: SummaryCol; dir: SortDir }>({ col: "lp", dir: "asc" });
+  function toggleSumSort(col: SummaryCol) {
+    setSumSort(prev => prev.col === col ? { col, dir: prev.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" });
+  }
+
+  const sortedMaterials = useMemo(() => [...filteredMaterials].sort((a, b) => {
+    switch (sumSort.col) {
+      case "lp":          return cmp(a.lp, b.lp, sumSort.dir);
+      case "name":        return cmp(a.name, b.name, sumSort.dir);
+      case "unit":        return cmp(a.unit, b.unit, sumSort.dir);
+      case "total_qty":   return cmp(a.total_qty, b.total_qty, sumSort.dir);
+      case "unit_price":  return cmp(a.unit_price, b.unit_price, sumSort.dir);
+      case "total_value": return cmp(a.total_value, b.total_value, sumSort.dir);
+    }
+  }), [filteredMaterials, sumSort]);
+
+  if (deptList.length === 0 && allMaterials.length === 0) {
     return <p className="text-sm text-gray-400 py-4">Brak danych o materiałach.</p>;
   }
 
-  const grandTotal = materials.reduce((sum, m) => sum + (m.total_value ?? 0), 0);
+  const grandTotal = filteredMaterials.reduce((sum, m) => sum + (m.total_value ?? 0), 0);
+  const noDeptData = filterTree.length === 0;
 
   return (
-    <div className="space-y-4">
+    <div className="lg:flex lg:gap-5 lg:items-start">
 
-      {/* ── Toolbar ── */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">{materials.length} pozycji materiałowych</p>
-        <button
-          onClick={allOpen ? () => setOpenSet(new Set()) : () => setOpenSet(new Set(allKeys))}
-          className="btn btn-secondary btn-sm"
-        >
-          {allOpen ? "Zwiń wszystko" : "Rozwiń wszystko"}
+      {/* ══ Filter panel ══ */}
+      <div className="lg:w-60 lg:shrink-0 lg:sticky lg:top-4 mb-4 lg:mb-0">
+
+        {/* Mobile toggle */}
+        <button onClick={() => setPanelOpen(!panelOpen)}
+          className="lg:hidden w-full flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+          <span className="flex items-center gap-2">
+            <span>Filtruj zakres</span>
+            {isFiltered && (
+              <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+                {selectedKeys.size}/{allFilterKeys.size}
+              </span>
+            )}
+          </span>
+          <span className="text-gray-400 text-xs">{panelOpen ? "▲" : "▼"}</span>
         </button>
+
+        {/* Panel body */}
+        <div className={`${panelOpen ? "block mt-2" : "hidden"} lg:block bg-white border border-gray-200 rounded-xl overflow-hidden`}>
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <span className="text-sm font-semibold text-gray-800">Zakres roboczy</span>
+            {isFiltered ? (
+              <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+                {selectedKeys.size}/{allFilterKeys.size}
+              </span>
+            ) : (
+              <span className="text-xs text-gray-400">{allFilterKeys.size} działów</span>
+            )}
+          </div>
+
+          {noDeptData ? (
+            <p className="px-4 py-4 text-xs text-gray-400 leading-relaxed">
+              Brak przypisania materiałów do działów.<br />
+              Wgraj ponownie plik ATH lub PDF zestawienia materiałów.
+            </p>
+          ) : (
+            <>
+              <div className="px-4 py-2 flex items-center gap-3 border-b border-gray-100">
+                <button onClick={() => setSelectedKeys(new Set(allFilterKeys))}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+                  Zaznacz wszystko
+                </button>
+                <span className="text-gray-200">|</span>
+                <button onClick={() => setSelectedKeys(new Set())}
+                  className="text-xs text-gray-500 hover:text-gray-700">
+                  Odznacz
+                </button>
+              </div>
+
+              <div className="max-h-[60vh] lg:max-h-[calc(100vh-260px)] overflow-y-auto">
+                {filterTree.map(parent => {
+                  const expanded = expandedFilter.has(parent.number);
+                  const hasSubs = parent.subs.length > 0;
+                  return (
+                    <div key={parent.number} className="border-b border-gray-50 last:border-0">
+                      <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50">
+                        <IndeterminateCheckbox
+                          checked={isParentChecked(parent)}
+                          indeterminate={isParentIndeterminate(parent)}
+                          onChange={() => toggleParent(parent)}
+                        />
+                        <button
+                          onClick={() => hasSubs && toggleFilterExpand(parent.number)}
+                          className={`flex-1 flex items-center justify-between text-left min-w-0 ${hasSubs ? "" : "cursor-default"}`}
+                        >
+                          <span className="text-xs font-medium text-gray-800 leading-tight truncate pr-1">
+                            {parent.number}. {parent.name}
+                          </span>
+                          {hasSubs && (
+                            <span className="text-gray-400 text-xs shrink-0">{expanded ? "▲" : "▼"}</span>
+                          )}
+                        </button>
+                      </div>
+
+                      {hasSubs && expanded && (
+                        <div className="bg-gray-50/60 pb-1">
+                          {parent.subs.map(sub => (
+                            <label key={sub.number}
+                              className="flex items-start gap-2 pl-8 pr-3 py-2 hover:bg-gray-100 cursor-pointer">
+                              <input type="checkbox"
+                                checked={selectedKeys.has(sub.number)}
+                                onChange={() => toggleSub(sub.number)}
+                                className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 text-blue-600 cursor-pointer shrink-0" />
+                              <span className="text-xs text-gray-700 leading-tight">
+                                {sub.number}. {sub.name}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {isFiltered && (
+                <div className="px-4 py-2.5 border-t border-gray-100 bg-blue-50/50">
+                  <p className="text-xs text-blue-700">
+                    Wartość zakresu: <span className="font-semibold">{fmt(grandTotal)} zł</span>
+                  </p>
+                  <button onClick={() => setSelectedKeys(new Set(allFilterKeys))}
+                    className="text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800 mt-0.5">
+                    Pokaż wszystkie
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
-      {/* ── Zestawienie całościowe ── */}
-      <div className="border border-blue-100 rounded-xl overflow-hidden">
-        <button
-          onClick={() => toggle("summary")}
-          className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 hover:bg-blue-100 transition-colors text-left"
-        >
-          <span className="font-semibold text-blue-900 text-sm">Zestawienie całościowe materiałów</span>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-blue-700 font-medium">{fmt(grandTotal)} zł</span>
-            <span className="text-blue-400 text-xs">{openSet.has("summary") ? "▲" : "▼"}</span>
-          </div>
-        </button>
+      {/* ══ Materials content ══ */}
+      <div className="flex-1 min-w-0 space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-500">
+            {isFiltered
+              ? <>{filteredMaterials.length} <span className="text-blue-600 font-medium">z {allMaterials.length}</span> pozycji</>
+              : <>{allMaterials.length} pozycji materiałowych</>
+            }
+          </p>
+          <button onClick={allOpen ? () => setOpenSet(new Set()) : () => setOpenSet(new Set(allKeys))}
+            className="btn btn-secondary btn-sm">
+            {allOpen ? "Zwiń wszystko" : "Rozwiń wszystko"}
+          </button>
+        </div>
 
-        {openSet.has("summary") && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-white">
-                  <SortTh label="Lp."         col="lp"          active={sumSort.col === "lp"}          dir={sumSort.dir} onClick={() => toggleSumSort("lp")} />
-                  <SortTh label="Nazwa materiału" col="name"     active={sumSort.col === "name"}        dir={sumSort.dir} onClick={() => toggleSumSort("name")} />
-                  <SortTh label="j.m."         col="unit"        active={sumSort.col === "unit"}        dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit")} />
-                  <SortTh label="Ilość łączna" col="total_qty"   active={sumSort.col === "total_qty"}   dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_qty")} />
-                  <SortTh label="Cena jedn. netto" col="unit_price"  active={sumSort.col === "unit_price"}  dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit_price")} />
-                  <SortTh label="Wartość netto"    col="total_value" active={sumSort.col === "total_value"} dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_value")} />
-                </tr>
-              </thead>
-              <tbody>
-                {sortedMaterials.map((m, idx) => (
-                  <tr key={m.id} className={`border-b border-gray-50 ${idx % 2 === 1 ? "bg-gray-50/50" : ""}`}>
-                    <td className="px-4 py-2 text-gray-400">{m.lp}</td>
-                    <td className="px-4 py-2 text-gray-900">{m.name}</td>
-                    <td className="px-4 py-2 text-right text-gray-600">{m.unit || "—"}</td>
-                    <td className="px-4 py-2 text-right text-gray-900 font-medium">{fmt(m.total_qty, 4)}</td>
-                    <td className="px-4 py-2 text-right text-gray-600">{fmt(m.unit_price)}</td>
-                    <td className="px-4 py-2 text-right font-medium text-gray-900">{fmt(m.total_value)} zł</td>
+        {/* Zestawienie całościowe */}
+        <div className="border border-blue-100 rounded-xl overflow-hidden">
+          <button onClick={() => toggle("summary")}
+            className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 hover:bg-blue-100 transition-colors text-left">
+            <span className="font-semibold text-blue-900 text-sm">Zestawienie całościowe materiałów</span>
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-blue-700 font-medium">{fmt(grandTotal)} zł</span>
+              <span className="text-blue-400 text-xs">{openSet.has("summary") ? "▲" : "▼"}</span>
+            </div>
+          </button>
+          {openSet.has("summary") && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-white">
+                    <SortTh label="Lp."              col="lp"          active={sumSort.col === "lp"}          dir={sumSort.dir} onClick={() => toggleSumSort("lp")} />
+                    <SortTh label="Nazwa materiału"  col="name"        active={sumSort.col === "name"}        dir={sumSort.dir} onClick={() => toggleSumSort("name")} />
+                    <SortTh label="j.m."             col="unit"        active={sumSort.col === "unit"}        dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit")} />
+                    <SortTh label="Ilość łączna"     col="total_qty"   active={sumSort.col === "total_qty"}   dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_qty")} />
+                    <SortTh label="Cena jedn. netto" col="unit_price"  active={sumSort.col === "unit_price"}  dir={sumSort.dir} align="right" onClick={() => toggleSumSort("unit_price")} />
+                    <SortTh label="Wartość netto"    col="total_value" active={sumSort.col === "total_value"} dir={sumSort.dir} align="right" onClick={() => toggleSumSort("total_value")} />
                   </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-gray-200 bg-blue-50">
-                  <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Razem netto:</td>
-                  <td className="px-4 py-2 text-right font-bold text-blue-900">{fmt(grandTotal)} zł</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {sortedMaterials.map((m, idx) => (
+                    <tr key={m.id} className={`border-b border-gray-50 ${idx % 2 === 1 ? "bg-gray-50/50" : ""}`}>
+                      <td className="px-4 py-2 text-gray-400">{m.lp}</td>
+                      <td className="px-4 py-2 text-gray-900">{m.name}</td>
+                      <td className="px-4 py-2 text-right text-gray-600">{m.unit || "—"}</td>
+                      <td className="px-4 py-2 text-right text-gray-900 font-medium">{fmt(m.total_qty, 4)}</td>
+                      <td className="px-4 py-2 text-right text-gray-600">{fmt(m.unit_price)}</td>
+                      <td className="px-4 py-2 text-right font-medium text-gray-900">{fmt(m.total_value)} zł</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-gray-200 bg-blue-50">
+                    <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Razem netto:</td>
+                    <td className="px-4 py-2 text-right font-bold text-blue-900">{fmt(grandTotal)} zł</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {filteredDeptList.map(dept => (
+          <DeptSection key={dept.number} dept={dept} isOpen={openSet.has(dept.number)} onToggle={() => toggle(dept.number)} />
+        ))}
+
+        {isFiltered && filteredMaterials.length === 0 && (
+          <p className="text-sm text-gray-400 py-4 text-center">Brak materiałów dla wybranego zakresu.</p>
         )}
       </div>
-
-      {/* ── Działy ── */}
-      {deptList.map((dept) => (
-        <DeptSection
-          key={dept.number}
-          dept={dept}
-          isOpen={openSet.has(dept.number)}
-          onToggle={() => toggle(dept.number)}
-        />
-      ))}
     </div>
   );
 }
 
-function DeptSection({
-  dept, isOpen, onToggle,
-}: {
-  dept: { number: string; name: string; items: { material: Material; dept: MaterialDept }[] };
-  isOpen: boolean;
-  onToggle: () => void;
+function DeptSection({ dept, isOpen, onToggle }: {
+  dept: DeptEntry; isOpen: boolean; onToggle: () => void;
 }) {
   const [sort, setSort] = useState<{ col: DeptCol; dir: SortDir }>({ col: "lp", dir: "asc" });
-
   function toggleSort(col: DeptCol) {
-    setSort((prev) => prev.col === col
-      ? { col, dir: prev.dir === "asc" ? "desc" : "asc" }
-      : { col, dir: "asc" }
-    );
+    setSort(prev => prev.col === col ? { col, dir: prev.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" });
   }
-
-  const sorted = useMemo(() => {
-    return [...dept.items].sort((a, b) => {
-      switch (sort.col) {
-        case "lp":         return cmp(a.material.lp, b.material.lp, sort.dir);
-        case "name":       return cmp(a.material.name, b.material.name, sort.dir);
-        case "unit":       return cmp(a.material.unit, b.material.unit, sort.dir);
-        case "qty":        return cmp(a.dept.qty, b.dept.qty, sort.dir);
-        case "unit_price": return cmp(a.material.unit_price, b.material.unit_price, sort.dir);
-        case "value":      return cmp(a.dept.value, b.dept.value, sort.dir);
-      }
-    });
-  }, [dept.items, sort]);
+  const sorted = useMemo(() => [...dept.items].sort((a, b) => {
+    switch (sort.col) {
+      case "lp":         return cmp(a.material.lp, b.material.lp, sort.dir);
+      case "name":       return cmp(a.material.name, b.material.name, sort.dir);
+      case "unit":       return cmp(a.material.unit, b.material.unit, sort.dir);
+      case "qty":        return cmp(a.dept.qty, b.dept.qty, sort.dir);
+      case "unit_price": return cmp(a.material.unit_price, b.material.unit_price, sort.dir);
+      case "value":      return cmp(a.dept.value, b.dept.value, sort.dir);
+    }
+  }), [dept.items, sort]);
 
   const totalValue = dept.items.reduce((sum, i) => sum + (i.dept.value ?? 0), 0);
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
-      >
+      <button onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left">
         <span className="font-semibold text-gray-900 text-sm">{dept.number}. {dept.name}</span>
         <div className="flex items-center gap-4">
           <span className="text-sm text-gray-600 font-medium">{fmt(totalValue)} zł</span>
           <span className="text-gray-400 text-xs">{isOpen ? "▲" : "▼"}</span>
         </div>
       </button>
-
       {isOpen && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-white">
-                <SortTh label="Lp."       col="lp"         active={sort.col === "lp"}         dir={sort.dir} onClick={() => toggleSort("lp")} />
-                <SortTh label="Nazwa materiału" col="name" active={sort.col === "name"}        dir={sort.dir} onClick={() => toggleSort("name")} />
-                <SortTh label="j.m."      col="unit"       active={sort.col === "unit"}        dir={sort.dir} align="right" onClick={() => toggleSort("unit")} />
-                <SortTh label="Ilość"     col="qty"        active={sort.col === "qty"}         dir={sort.dir} align="right" onClick={() => toggleSort("qty")} />
-                <SortTh label="Cena jedn. netto" col="unit_price" active={sort.col === "unit_price"} dir={sort.dir} align="right" onClick={() => toggleSort("unit_price")} />
-                <SortTh label="Wartość netto"   col="value"      active={sort.col === "value"}       dir={sort.dir} align="right" onClick={() => toggleSort("value")} />
+                <SortTh label="Lp."              col="lp"         active={sort.col === "lp"}         dir={sort.dir} onClick={() => toggleSort("lp")} />
+                <SortTh label="Nazwa materiału"  col="name"       active={sort.col === "name"}        dir={sort.dir} onClick={() => toggleSort("name")} />
+                <SortTh label="j.m."             col="unit"       active={sort.col === "unit"}        dir={sort.dir} align="right" onClick={() => toggleSort("unit")} />
+                <SortTh label="Ilość"            col="qty"        active={sort.col === "qty"}         dir={sort.dir} align="right" onClick={() => toggleSort("qty")} />
+                <SortTh label="Cena jedn. netto" col="unit_price" active={sort.col === "unit_price"}  dir={sort.dir} align="right" onClick={() => toggleSort("unit_price")} />
+                <SortTh label="Wartość netto"    col="value"      active={sort.col === "value"}       dir={sort.dir} align="right" onClick={() => toggleSort("value")} />
               </tr>
             </thead>
             <tbody>

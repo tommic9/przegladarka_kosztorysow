@@ -4,6 +4,7 @@ import db from "@/lib/db";
 import ProjectAccessManager from "@/components/ProjectAccessManager";
 import AddVersionForm from "@/components/AddVersionForm";
 import ProjectTabs from "@/components/ProjectTabs";
+import DeleteProjectButton from "@/components/DeleteProjectButton";
 
 function fmt(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
@@ -74,6 +75,7 @@ export default async function AdminProjectPage({ params }: PageProps) {
           <h1 className="text-2xl font-bold text-gray-900">{project.title}</h1>
           {project.investor && <p className="text-gray-500 mt-0.5">{project.investor}</p>}
         </div>
+        <DeleteProjectButton projectId={projectId} />
       </div>
 
       {/* Metadata + stats */}
