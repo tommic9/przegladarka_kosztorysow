@@ -1,23 +1,66 @@
 @import "tailwindcss";
 
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+:root {
+  --bg:         #f5f4f0;
+  --nav-bg:     #1b2a38;
+  --nav-border: #243447;
+  --accent:     #d97706;
+  --accent-dim: #92400e;
+  --border:     #dbd7cf;
+  --border-med: #c8c3b8;
+  --card:       #ffffff;
+  --text:       #18191c;
+  --text-muted: #6b7280;
+}
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
 @layer base {
   * {
     box-sizing: border-box;
   }
+
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    font-family: var(--font-nunito), 'Nunito Sans', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-syne), 'Syne', system-ui, sans-serif;
+    letter-spacing: -0.01em;
+  }
+
+  /* Number columns — tabular figures everywhere */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
   }
 }
 
+/* ── Components ────────────────────────────────────────────────────────────── */
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors cursor-pointer select-none;
+    font-family: var(--font-nunito), sans-serif;
   }
   .btn-primary {
-    @apply bg-blue-600 border-blue-700 text-white hover:bg-blue-700 hover:border-blue-800;
+    background: var(--nav-bg);
+    border-color: var(--nav-bg);
+    color: white;
+  }
+  .btn-primary:hover {
+    background: #243447;
+    border-color: #243447;
   }
   .btn-secondary {
-    @apply bg-white border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400;
+    @apply bg-white text-gray-700 hover:bg-gray-50;
+    border-color: var(--border);
+  }
+  .btn-secondary:hover {
+    border-color: var(--border-med);
   }
   .btn-danger {
     @apply bg-white border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400;
@@ -31,14 +74,37 @@
   .btn:disabled {
     @apply opacity-50 cursor-not-allowed;
   }
+
+  /* Unified input style */
+  .form-input {
+    @apply w-full px-3 py-2 text-sm rounded-lg outline-none transition-shadow;
+    border: 1px solid var(--border-med);
+    font-family: var(--font-nunito), sans-serif;
+  }
+  .form-input:focus {
+    border-color: var(--nav-bg);
+    box-shadow: 0 0 0 3px rgba(27, 42, 56, 0.08);
+  }
+
+  /* Card */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+  }
 }
 
+/* ── Utilities ─────────────────────────────────────────────────────────────── */
 @layer utilities {
   .print-only {
     display: none;
   }
+  .font-heading {
+    font-family: var(--font-syne), 'Syne', system-ui, sans-serif;
+  }
 }
 
+/* ── Print ─────────────────────────────────────────────────────────────────── */
 @media print {
   .no-print {
     display: none !important;
@@ -53,64 +119,36 @@
     color: #000;
   }
 
-  /* Hide disabled (unchecked) rows and empty chapters */
-  tr[data-disabled] {
-    display: none !important;
-  }
-  [data-all-disabled] {
-    display: none !important;
-  }
+  tr[data-disabled] { display: none !important; }
+  [data-all-disabled] { display: none !important; }
 
-  /* Tables */
-  table {
-    border-collapse: collapse;
-    width: 100%;
-  }
-
-  th, td {
-    border: 1px solid #ccc;
-    padding: 3pt 5pt;
-    font-size: 9pt;
-  }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: 3pt 5pt; font-size: 9pt; }
 
   thead {
     background-color: #f0f0f0 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-
   tfoot {
     background-color: #f0f0f0 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
-  /* Chapter headers */
   .border.border-gray-200.rounded-xl {
     border: 1pt solid #333 !important;
     margin-bottom: 8pt;
     page-break-inside: avoid;
   }
 
-  /* Summary box */
   .border-t-2 {
     border-top: 2pt solid #000 !important;
     margin-top: 12pt;
   }
 
-  /* Remove rounded corners */
-  * {
-    border-radius: 0 !important;
-  }
+  * { border-radius: 0 !important; }
 
-  /* Page breaks */
-  h1 {
-    page-break-after: avoid;
-  }
-
-  tr {
-    page-break-inside: avoid;
-  }
-
-  /* Disabled items are hidden in print — line-through only on screen */
+  h1 { page-break-after: avoid; }
+  tr { page-break-inside: avoid; }
 }
