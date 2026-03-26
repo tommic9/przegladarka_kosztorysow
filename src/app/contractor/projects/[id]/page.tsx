@@ -46,6 +46,10 @@ export default async function ContractorProjectPage({ params }: PageProps) {
     items = db.prepare("SELECT * FROM cost_items WHERE version_id = ? ORDER BY lp").all(latestVersion.id);
   }
 
+  const projectFiles = db
+    .prepare("SELECT id, original_name, description, uploaded_at FROM project_files WHERE project_id = ? ORDER BY uploaded_at DESC")
+    .all(projectId) as { id: number; original_name: string; description: string | null; uploaded_at: string }[];
+
   return (
     <div>
       {/* Header */}
@@ -92,6 +96,7 @@ export default async function ContractorProjectPage({ params }: PageProps) {
           vat_rate: latestVersion?.vat_rate ?? null,
         }}
         versionDate={latestVersion?.uploaded_at ?? new Date().toISOString()}
+        files={projectFiles}
       />
     </div>
   );

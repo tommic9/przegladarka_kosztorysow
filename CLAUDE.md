@@ -37,7 +37,9 @@ project_access    project_id, user_id
 materials         id, version_id, lp, index_code, name, unit, total_qty, unit_price, total_value
 material_depts    id, material_id, dept_number, dept_name, sub_dept_number, sub_dept_name, qty, value
 cost_chapters     id, version_id, number, name, order_index, total_netto
-cost_items        id, version_id, chapter_id, lp, knr, name, unit, qty, unit_price, total_value_netto
+cost_items        id, version_id, chapter_id, lp, knr, name, unit, qty, unit_price, total_value_netto, measurement
+project_files     id, project_id, file_name, original_name, description, uploaded_at
+settlements       id, project_id, contractor_id, description, amount, status ('pending'|'paid'), created_at
 ```
 
 ## Dwa typy PDF z NormaWExpert
@@ -61,13 +63,18 @@ cost_items        id, version_id, chapter_id, lp, knr, name, unit, qty, unit_pri
 - Historia wersji projektu (każdy upload = nowa wersja, stare zostają)
 - Zarządzanie dostępem: przypisz wykonawcę(ów) do projektu
 - Zarządzanie użytkownikami: dodaj/usuń wykonawcę
+- **Pliki projektu**: wgraj gotowy kosztorys PDF/inne pliki, wykonawca może pobrać
+- **Rozliczenia**: dodaj pozycję rozliczeniową (wykonawca, opis, kwota), zmień status paid/pending
+- Podgląd widoku wykonawcy bezpośrednio na stronie projektu
 
 ### Wykonawca
 - Login → lista przypisanych projektów
-- Widok projektu — 3 zakładki:
-  1. **Materiały** — accordion wg działów: Lp | Nazwa | j.m. | Ilość | Cena | Wartość
-  2. **Kalkulator oferty** — checkboxy przy pozycjach, live suma netto/VAT/brutto, przycisk "Drukuj ofertę"
-  3. **Porównaj wersje** — diff między wersjami: zielone (dodane), czerwone (usunięte), żółte (zmienione)
+- Widok projektu — 4 zakładki:
+  1. **Materiały** — accordion wg działów: Lp | Nazwa | j.m. | Ilość | Cena | Wartość; panel filtrów wg działów
+  2. **Kalkulator oferty** — checkboxy przy pozycjach, live suma netto/VAT/brutto (sticky), przycisk "Drukuj ofertę"
+  3. **Pliki** — lista plików do pobrania wgranych przez admina
+  4. **Porównaj wersje** — diff między wersjami: zielone (dodane), czerwone (usunięte), żółte (zmienione)
+- **Rozliczenia** (`/contractor/rozliczenia`) — zbiorcza lista wszystkich rozliczeń ze wszystkich projektów: projekt | opis | kwota | status
 
 ### Drukowanie (print CSS)
 Format oficjalny KOSZTORYS OFERTOWY:
@@ -83,6 +90,7 @@ JWT_SECRET=<losowy_string_min_32_znaki>
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=<haslo>
 DATABASE_PATH=./data/database.sqlite
+UPLOADS_PATH=./data/uploads       # opcjonalne, domyślnie data/uploads/
 ```
 
 ## Sample PDFy (do testowania parsera)
@@ -107,4 +115,5 @@ Pełna instrukcja: `DEPLOY.md`
 3. Cloudflare Tunnel (po zakupie domeny)
 4. Backup `data/database.sqlite` → dysk 2TB USB (`/dev/sda1`)
 
-Nie przechowujemy oryginalnych PDFów — tylko sparsowane dane w SQLite.
+Oryginalne pliki kosztorysów (ATH/PDF do parsowania) nie są przechowywane — tylko sparsowane dane w SQLite.
+Pliki wgrane przez admina jako "do pobrania" (`project_files`) są przechowywane w `data/uploads/` (ignorowane przez git).

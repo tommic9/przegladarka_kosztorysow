@@ -102,6 +102,25 @@ db.exec(`
     total_value_netto REAL,
     measurement TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS project_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    description TEXT,
+    uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    contractor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    amount REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'paid')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migrations — add columns that may not exist in older databases
@@ -187,4 +206,23 @@ export type CostItem = {
   unit_price: number | null;
   total_value_netto: number | null;
   measurement: string | null;
+};
+
+export type ProjectFile = {
+  id: number;
+  project_id: number;
+  file_name: string;
+  original_name: string;
+  description: string | null;
+  uploaded_at: string;
+};
+
+export type Settlement = {
+  id: number;
+  project_id: number;
+  contractor_id: number;
+  description: string;
+  amount: number;
+  status: "pending" | "paid";
+  created_at: string;
 };

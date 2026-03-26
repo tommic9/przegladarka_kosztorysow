@@ -5,6 +5,8 @@ import ProjectAccessManager from "@/components/ProjectAccessManager";
 import AddVersionForm from "@/components/AddVersionForm";
 import ProjectTabs from "@/components/ProjectTabs";
 import DeleteProjectButton from "@/components/DeleteProjectButton";
+import ProjectFilesManager from "@/components/ProjectFilesManager";
+import SettlementsManager from "@/components/SettlementsManager";
 
 function fmt(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
@@ -61,6 +63,33 @@ export default async function AdminProjectPage({ params }: PageProps) {
     .prepare("SELECT user_id FROM project_access WHERE project_id = ?")
     .all(projectId)
     .map((r) => (r as { user_id: number }).user_id);
+
+  const projectFiles = db
+    .prepare("SELECT * FROM project_files WHERE project_id = ? ORDER BY uploaded_at DESC")
+    .all(projectId) as {
+    id: number; project_id: number; file_name: string; original_name: string;
+    description: string | null; uploaded_at: string;
+  }[];
+
+  const assignedContractors = db
+    .prepare(
+      `SELECT u.id, u.name, u.email FROM users u
+       JOIN project_access pa ON pa.user_id = u.id
+       WHERE pa.project_id = ? ORDER BY u.name`
+    )
+    .all(projectId) as { id: number; name: string; email: string }[];
+
+  const settlements = db
+    .prepare(
+      `SELECT s.*, u.name as contractor_name, u.email as contractor_email
+       FROM settlements s JOIN users u ON u.id = s.contractor_id
+       WHERE s.project_id = ? ORDER BY s.created_at DESC`
+    )
+    .all(projectId) as {
+    id: number; project_id: number; contractor_id: number; contractor_name: string;
+    contractor_email: string; description: string; amount: number;
+    status: "pending" | "paid"; created_at: string;
+  }[];
 
   return (
     <div className="space-y-6">
@@ -155,6 +184,23 @@ export default async function AdminProjectPage({ params }: PageProps) {
         </dl>
       </div>
 
+      {/* Files + Settlements */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 className="text-base font-semibold text-gray-900 mb-4">Pliki do pobrania</h2>
+          <ProjectFilesManager projectId={projectId} initialFiles={projectFiles} />
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 className="text-base font-semibold text-gray-900 mb-4">Rozliczenia</h2>
+          <SettlementsManager
+            projectId={projectId}
+            initialSettlements={settlements}
+            contractors={assignedContractors}
+          />
+        </div>
+      </div>
+
       {/* Contractor view */}
       {latestVersion && (
         <div>
@@ -175,6 +221,7 @@ export default async function AdminProjectPage({ params }: PageProps) {
               vat_rate: latestVersion.vat_rate ?? null,
             }}
             versionDate={latestVersion.uploaded_at}
+            files={projectFiles}
           />
         </div>
       )}
