@@ -247,12 +247,59 @@ crontab -e
 
 ## Aktualizacja aplikacji
 
+### Docker (aktualna konfiguracja)
+
 ```bash
 cd /opt/zestawienia
-git pull                    # lub skopiuj nowe pliki
+git pull origin main
+docker compose up -d --build
+```
+
+Komenda `--build` przebudowuje obraz; `data/` jest zamontowane jako volume — baza danych nie jest dotykana.
+
+### PM2 (stary sposób)
+
+```bash
+cd /opt/zestawienia
+git pull
 npm install
 npm run build
 pm2 restart zestawienia
+```
+
+---
+
+## Docker — pierwsze uruchomienie
+
+Wymagania: Docker + Docker Compose zainstalowane w LXC.
+
+```bash
+cd /opt/zestawienia
+git clone https://github.com/tommic9/przegladarka_kosztorysow.git .
+
+# Utwórz plik ze zmiennymi środowiskowymi
+nano .env.docker
+```
+
+Zawartość `.env.docker`:
+```
+JWT_SECRET=wygeneruj_openssl_rand_hex_32
+ADMIN_EMAIL=twoj@email.pl
+ADMIN_PASSWORD=silne_haslo
+ADMIN_NAME=Twoje Imię
+DATABASE_PATH=/app/data/database.sqlite
+UPLOADS_PATH=/app/data/uploads
+```
+
+```bash
+# Zbuduj i uruchom
+docker compose up -d --build
+
+# Seed admina (tylko przy pierwszym uruchomieniu)
+docker exec zestawienia npx tsx src/scripts/seed.ts
+
+# Logi
+docker logs -f zestawienia
 ```
 
 ---
