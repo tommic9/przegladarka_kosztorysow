@@ -117,8 +117,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 text-sm font-semibold text-white rounded-lg transition-all disabled:opacity-60"
-              style={{ background: "var(--nav-bg)" }}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 text-sm font-semibold text-white rounded-lg transition-all disabled:opacity-60 bg-slate-800 hover:bg-slate-700 active:bg-slate-900"
             >
               {loading ? (
                 <>

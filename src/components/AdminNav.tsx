@@ -37,14 +37,14 @@ export default function AdminNav({ userName }: { userName: string }) {
   }
 
   return (
-    <nav className="no-print" style={{ background: "var(--nav-bg)", borderBottom: "1px solid var(--nav-border)" }}>
+    <nav className="no-print bg-slate-900 border-b border-slate-800">
       <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
         {/* Brand + links */}
         <div className="flex items-center gap-4 min-w-0">
           <span className="font-heading font-bold text-white text-sm tracking-widest shrink-0 hidden sm:block">
             KOSZTORYSY
           </span>
-          <div className="h-4 w-px bg-slate-600 hidden sm:block shrink-0" />
+          <div className="h-4 w-px bg-slate-700 hidden sm:block shrink-0" />
           <div className="flex gap-1 overflow-x-auto scrollbar-hide">
             {links.map((l) => {
               const isActive = pathname === l.href || (l.href !== "/admin" && pathname.startsWith(l.href));
@@ -53,9 +53,8 @@ export default function AdminNav({ userName }: { userName: string }) {
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
                     isActive
                       ? "text-amber-400 bg-white/10"
-                      : "text-slate-300 hover:text-white hover:bg-white/8"
+                      : "text-slate-200 hover:text-white hover:bg-white/10"
                   }`}
-                  style={isActive ? { background: "rgba(255,255,255,0.1)" } : {}}
                 >
                   {l.icon}
                   <span>{l.label}</span>
@@ -67,11 +66,10 @@ export default function AdminNav({ userName }: { userName: string }) {
 
         {/* User + logout */}
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-slate-400 hidden md:block truncate max-w-[160px]">{userName}</span>
+          <span className="text-xs text-slate-300 hidden md:block truncate max-w-[160px]">{userName}</span>
           <button
             onClick={handleLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors text-slate-300 hover:text-white"
-            style={{ border: "1px solid rgba(255,255,255,0.12)" }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors text-slate-200 hover:text-white border border-slate-600 hover:border-slate-400"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>

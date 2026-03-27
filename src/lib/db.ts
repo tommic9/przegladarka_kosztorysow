@@ -125,6 +125,7 @@ db.exec(`
 
 // Migrations — add columns that may not exist in older databases
 try { db.exec(`ALTER TABLE cost_items ADD COLUMN measurement TEXT`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE project_versions ADD COLUMN total_rg REAL`); } catch { /* already exists */ }
 
 export default db;
 

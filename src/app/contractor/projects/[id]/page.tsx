@@ -28,6 +28,7 @@ export default async function ContractorProjectPage({ params }: PageProps) {
     .all(projectId) as {
     id: number; version_number: number; uploaded_at: string; notes: string | null;
     total_netto: number | null; vat_rate: number | null; total_brutto: number | null;
+    total_rg: number | null;
   }[];
 
   const latestVersion = versions[0];
@@ -94,6 +95,8 @@ export default async function ContractorProjectPage({ params }: PageProps) {
           address: project.address,
           contractor_name: project.contractor_name,
           vat_rate: latestVersion?.vat_rate ?? null,
+          total_netto: latestVersion?.total_netto ?? null,
+          total_rg: latestVersion?.total_rg ?? null,
         }}
         versionDate={latestVersion?.uploaded_at ?? new Date().toISOString()}
         files={projectFiles}

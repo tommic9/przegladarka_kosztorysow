@@ -30,7 +30,7 @@ export default async function AdminProjectPage({ params }: PageProps) {
     .all(projectId) as {
     id: number; version_number: number; uploaded_at: string; notes: string | null;
     total_netto: number | null; vat_rate: number | null; vat_amount: number | null;
-    total_brutto: number | null; materials_file_name: string | null; estimate_file_name: string | null;
+    total_brutto: number | null; total_rg: number | null; materials_file_name: string | null; estimate_file_name: string | null;
   }[];
 
   const latestVersion = versions[0];
@@ -219,6 +219,8 @@ export default async function AdminProjectPage({ params }: PageProps) {
               address: project.address,
               contractor_name: project.contractor_name,
               vat_rate: latestVersion.vat_rate ?? null,
+              total_netto: latestVersion.total_netto ?? null,
+              total_rg: latestVersion.total_rg ?? null,
             }}
             versionDate={latestVersion.uploaded_at}
             files={projectFiles}

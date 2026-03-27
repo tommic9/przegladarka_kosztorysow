@@ -77,6 +77,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     let vatRate: number | null = null;
     let vatAmount: number | null = null;
     let totalBrutto: number | null = null;
+    let totalRg: number | null = null;
     let estimateFileName: string | null = null;
     let materialsFileName: string | null = null;
 
@@ -93,8 +94,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       estimateFileName = athFile.name;
       materialsFileName = athFile.name;
       const buf = Buffer.from(await athFile.arrayBuffer());
-      const { estimate, materials: athMaterials } = parseAth(buf);
+      const { estimate, materials: athMaterials, totalRg: athRg } = parseAth(buf);
       totalNetto = estimate.meta.total_netto;
+      totalRg = athRg;
       vatRate = estimate.meta.vat_rate;
       vatAmount = estimate.meta.vat_amount;
       totalBrutto = estimate.meta.total_brutto;
@@ -142,8 +144,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     const insertVersion = db.prepare(
-      `INSERT INTO project_versions (project_id, version_number, notes, total_netto, vat_rate, vat_amount, total_brutto, materials_file_name, estimate_file_name)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO project_versions (project_id, version_number, notes, total_netto, vat_rate, vat_amount, total_brutto, total_rg, materials_file_name, estimate_file_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insertMaterial = db.prepare(
       `INSERT INTO materials (version_id, lp, index_code, name, unit, total_qty, unit_price, total_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -160,7 +162,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const run = db.transaction(() => {
       const { lastInsertRowid: versionId } = insertVersion.run(
-        projectId, nextVersion, notes, totalNetto, vatRate, vatAmount, totalBrutto,
+        projectId, nextVersion, notes, totalNetto, vatRate, vatAmount, totalBrutto, totalRg,
         materialsFileName, estimateFileName
       );
 

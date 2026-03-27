@@ -92,6 +92,7 @@ function parseSections(text: string): Section[] {
 export function parseAth(buffer: Buffer): {
   estimate: ParsedEstimate;
   materials: ParsedMaterial[];
+  totalRg: number | null;
 } {
   // Decode CP1250 — supported by Node.js TextDecoder (WHATWG Encoding API)
   let text: string;
@@ -217,7 +218,8 @@ export function parseAth(buffer: Buffer): {
       const woParts = (przedmiar.fields["wo"] ?? "").split("\t");
       const result = woParts[0]?.trim();
       const formula = woParts[2]?.trim();
-      const unit = firstToken(s.fields["jm"] ?? "") || null;
+      // Strip descriptive qualifiers from unit: "m2 ściany" → "m2", "m3 drew." → "m3"
+      const unit = (firstToken(s.fields["jm"] ?? "").split(" ")[0]) || null;
       if (formula) {
         measurement = unit ? `${formula} = ${result} ${unit}` : `${formula} = ${result}`;
       } else if (result) {
@@ -230,7 +232,7 @@ export function parseAth(buffer: Buffer): {
       chapter_number: parentChapterNum,
       knr,
       name: firstToken(s.fields["na"] ?? ""),
-      unit: firstToken(s.fields["jm"] ?? "") || null,
+      unit: (firstToken(s.fields["jm"] ?? "").split(" ")[0]) || null,
       qty,
       unit_price: unitPrice,
       total_value_netto: totalValue,
@@ -240,29 +242,25 @@ export function parseAth(buffer: Buffer): {
 
   const estimate: ParsedEstimate = { meta, chapters, items: costItems };
 
-  // ── Materials ([RMS ZEST N] with ty=M) ───────────────────────────────────
-  // RMS ZEST sections appear within ELEMENT blocks — track current chapter
-  // to build dept associations. Deduplicate by index_code (same material may
-  // appear in multiple chapters).
+  // ── Materials from [RMS ZEST N] ty=M ─────────────────────────────────────
+  // Build chapter lookup by nu value
+  const chapterByNu: Record<string, ParsedCostChapter> = {};
+  for (const ch of chapters) chapterByNu[ch.number] = ch;
+
   const materialMap = new Map<string, ParsedMaterial>();
   const materials: ParsedMaterial[] = [];
   let matLp = 1;
-  let currentChapterNum: string | null = null;
-  let currentChapterName: string | null = null;
+
+  // rmsIndex → material code — used to identify materials in per-position [RMS N] sections
+  const rmsIndexToCode = new Map<number, string>();
 
   for (const s of sections) {
-    if (/^ELEMENT\s+[12]$/.test(s.name)) {
-      currentChapterNum = firstToken(s.fields["nu"] ?? "") || null;
-      currentChapterName = firstToken(s.fields["na"] ?? "") || null;
-      continue;
-    }
-
     if (!s.name.startsWith("RMS ZEST ")) continue;
-    if (firstToken(s.fields["ty"] ?? "") !== "M") continue;
+    if (firstToken(s.fields["ty"] ?? "").toUpperCase() !== "M") continue;
 
+    const code = (s.fields["id"] ?? "").split("\t")[0].trim();
     const name = firstToken(s.fields["na"] ?? "");
-    const code = firstToken(s.fields["id"] ?? "");
-    if (!name || code === "0000000") continue;
+    if (!name || !code || code === "0000000") continue;
 
     const qty = parseAthNum(s.fields["il"] ?? "");
     const unitPrice = parseAthNum(s.fields["cw"] ?? "");
@@ -272,24 +270,15 @@ export function parseAth(buffer: Buffer): {
         : null;
     const unit = firstToken(s.fields["jm"] ?? "") || null;
 
-    const deptEntry: import("./pdf-parser").ParsedDept | null = currentChapterNum ? {
-      dept_number: currentChapterNum,
-      dept_name: currentChapterName ?? currentChapterNum,
-      sub_dept_number: null,
-      sub_dept_name: null,
-      unit,
-      qty,
-      unit_price: unitPrice,
-      value: totalValue,
-    } : null;
+    const rmsNum = parseInt(s.name.slice("RMS ZEST ".length).trim(), 10);
+    if (!isNaN(rmsNum)) rmsIndexToCode.set(rmsNum, code);
 
     const existing = materialMap.get(code);
     if (existing) {
       existing.total_qty = Math.round(((existing.total_qty ?? 0) + (qty ?? 0)) * 10000) / 10000;
       existing.total_value = Math.round(((existing.total_value ?? 0) + (totalValue ?? 0)) * 100) / 100;
-      if (deptEntry) existing.depts.push(deptEntry);
     } else {
-      const mat: ParsedMaterial = {
+      materialMap.set(code, {
         lp: matLp++,
         index_code: code,
         name,
@@ -297,12 +286,72 @@ export function parseAth(buffer: Buffer): {
         total_qty: qty,
         unit_price: unitPrice,
         total_value: totalValue,
-        depts: deptEntry ? [deptEntry] : [],
-      };
-      materialMap.set(code, mat);
-      materials.push(mat);
+        depts: [],
+      });
+      materials.push(materialMap.get(code)!);
     }
   }
 
-  return { estimate, materials };
+  // ── Per-position dept assignment from [RMS N] sections ───────────────────
+  // Each [RMS N] section appears after an [ELEMENT] section (chapter context).
+  // il= is the actual quantity used in that position; sum across positions
+  // equals the global total in [RMS ZEST N].
+  // This approach correctly handles materials that span multiple chapters and
+  // sub-chapters (dotted nu like "2.1", "2.2").
+  {
+    // Accumulate qty per (code, chapterNu)
+    const deptQty = new Map<string, Map<string, number>>(); // code → chapterNu → qty
+    let curChapterNu: string | null = null;
+
+    for (const s of sections) {
+      if (/^ELEMENT\s+[12]$/.test(s.name)) {
+        curChapterNu = firstToken(s.fields["nu"] ?? "") || null;
+        continue;
+      }
+      const rmsMatch = s.name.match(/^RMS\s+(\d+)$/);
+      if (!rmsMatch || curChapterNu === null) continue;
+      const code = rmsIndexToCode.get(parseInt(rmsMatch[1], 10));
+      if (!code) continue;
+      const il = parseAthNum(s.fields["il"] ?? "");
+      if (il === null || il === 0) continue;
+      if (!deptQty.has(code)) deptQty.set(code, new Map());
+      const m = deptQty.get(code)!;
+      m.set(curChapterNu, Math.round(((m.get(curChapterNu) ?? 0) + il) * 10000) / 10000);
+    }
+
+    // Build dept entries
+    for (const [code, chapterMap] of deptQty) {
+      const mat = materialMap.get(code);
+      if (!mat) continue;
+      for (const [chNu, qty] of chapterMap) {
+        const isDot = chNu.includes(".");
+        const parentNum = isDot ? chNu.split(".")[0] : chNu;
+        const parentCh = chapterByNu[parentNum];
+        const subCh = isDot ? chapterByNu[chNu] : null;
+        mat.depts.push({
+          dept_number: parentNum,
+          dept_name: parentCh?.name ?? parentNum,
+          sub_dept_number: isDot ? chNu : null,
+          sub_dept_name: isDot ? (subCh?.name ?? chNu) : null,
+          unit: mat.unit,
+          qty,
+          unit_price: mat.unit_price,
+          value: mat.unit_price !== null ? Math.round(qty * mat.unit_price * 100) / 100 : null,
+        });
+      }
+    }
+  }
+
+  // ── Total roboczogodziny ([RMS ZEST N] with ty=R) ────────────────────────
+  let totalRg: number | null = null;
+  for (const s of sections) {
+    if (!s.name.startsWith("RMS ZEST ")) continue;
+    if (firstToken(s.fields["ty"] ?? "").toUpperCase() !== "R") continue;
+    const qty = parseAthNum(s.fields["il"] ?? "");
+    if (qty !== null) {
+      totalRg = Math.round(((totalRg ?? 0) + qty) * 100) / 100;
+    }
+  }
+
+  return { estimate, materials, totalRg };
 }

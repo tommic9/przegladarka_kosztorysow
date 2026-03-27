@@ -22,7 +22,9 @@
 
   body {
     font-family: var(--font-nunito), 'Nunito Sans', system-ui, sans-serif;
-    background: var(--bg);
+    background: linear-gradient(160deg, #eef6ff 0%, #f5f4f0 40%, #fdf8ef 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
     color: var(--text);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
