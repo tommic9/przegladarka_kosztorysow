@@ -106,14 +106,15 @@ Weryfikacja: po uploadzie Typ A powinny być 41 materiałów, poprawnie przypisa
 
 Pełna instrukcja: `DEPLOY.md`
 
-**Aktualny adres (Quick Tunnel, tymczasowy):**
-`https://emma-trembl-newport-glory.trycloudflare.com`
-> Quick Tunnel zmienia URL przy każdym restarcie `cloudflared`. Docelowo stały adres po zakupie domeny.
-
 1. LXC Debian 12 na Proxmox (2 vCPU, 2GB RAM, 20GB NVMe)
-2. Node.js 20 LTS + PM2
+2. **Docker + Docker Compose** (Alpine) — `Dockerfile` i `docker-compose.yml` w repo
 3. Cloudflare Tunnel (po zakupie domeny)
 4. Backup `data/database.sqlite` → dysk 2TB USB (`/dev/sda1`)
+
+**Aktualizacja na produkcji:**
+```bash
+cd /opt/zestawienia && git pull origin main && docker compose up -d --build
+```
 
 Oryginalne pliki kosztorysów (ATH/PDF do parsowania) nie są przechowywane — tylko sparsowane dane w SQLite.
 Pliki wgrane przez admina jako "do pobrania" (`project_files`) są przechowywane w `data/uploads/` (ignorowane przez git).
